@@ -1,6 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  allowedDevOrigins: ['127.0.0.1', 'localhost'],
+  reactStrictMode: true,
+  images: {
+    domains: ['i.scdn.co'], // For Spotify images
+  },
 }
 
 module.exports = nextConfig
