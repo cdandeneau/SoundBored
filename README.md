@@ -22,5 +22,5 @@ Prerequisites
 
 1. Clone the repository
    ```terminal
-   git clone https://github.com/yourusername/spotify-tier-list.git
-   cd spotify-tier-list
+   git clone https://github.com/yourusername/SoundBored.git
+   cd SoundBored
