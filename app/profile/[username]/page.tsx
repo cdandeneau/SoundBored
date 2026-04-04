@@ -29,6 +29,25 @@ type FavoriteAlbum = {
   position: number;
 };
 
+type SongRating = {
+  id: string;
+  spotify_track_id: string;
+  track_name: string;
+  artist_name: string;
+  album_name: string | null;
+  image_url: string | null;
+  rating: number;
+  review: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+function formatNotes(rating: number) {
+  const fullNotes = Math.floor(rating);
+  const half = rating % 1 !== 0;
+  return "♪".repeat(fullNotes) + (half ? "◐" : "");
+}
+
 export default function PublicProfilePage() {
   const params = useParams();
   const username =
@@ -37,6 +56,7 @@ export default function PublicProfilePage() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [favoriteTracks, setFavoriteTracks] = useState<FavoriteTrack[]>([]);
   const [favoriteAlbums, setFavoriteAlbums] = useState<FavoriteAlbum[]>([]);
+  const [recentRatings, setRecentRatings] = useState<SongRating[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
@@ -83,6 +103,21 @@ export default function PublicProfilePage() {
         console.error("Error loading favorite albums:", albumsError.message);
       } else {
         setFavoriteAlbums(albumsData || []);
+      }
+
+      const { data: ratingsData, error: ratingsError } = await supabase
+        .from("song_ratings")
+        .select(
+          "id, spotify_track_id, track_name, artist_name, album_name, image_url, rating, review, created_at, updated_at"
+        )
+        .eq("user_id", profileData.id)
+        .order("updated_at", { ascending: false })
+        .limit(5);
+
+      if (ratingsError) {
+        console.error("Error loading recent ratings:", ratingsError.message);
+      } else {
+        setRecentRatings((ratingsData || []) as SongRating[]);
       }
 
       setLoading(false);
@@ -140,6 +175,59 @@ export default function PublicProfilePage() {
             </p>
           </div>
         </div>
+
+        <section className="rounded-2xl bg-zinc-900 p-8 shadow-lg">
+          <h2 className="mb-4 text-2xl font-bold">Recent Ratings</h2>
+
+          <div className="space-y-3">
+            {recentRatings.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-zinc-700 p-6 text-center text-zinc-400">
+                No song ratings yet.
+              </div>
+            ) : (
+              recentRatings.map((rating) => (
+                <div key={rating.id} className="rounded-xl bg-zinc-800/60 p-4">
+                  <div className="flex items-center gap-4">
+                    {rating.image_url ? (
+                      <img
+                        src={rating.image_url}
+                        alt={rating.track_name}
+                        className="h-16 w-16 rounded-lg object-cover"
+                      />
+                    ) : (
+                      <div className="h-16 w-16 rounded-lg bg-zinc-700" />
+                    )}
+
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-semibold text-white">
+                        {rating.track_name}
+                      </p>
+                      <p className="truncate text-sm text-zinc-400">
+                        {rating.artist_name}
+                      </p>
+                      {rating.album_name && (
+                        <p className="truncate text-xs text-zinc-500">
+                          {rating.album_name}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="text-right">
+                      <p className="text-xl font-semibold text-green-400">
+                        {formatNotes(rating.rating)}
+                      </p>
+                      <p className="text-sm text-zinc-400">{rating.rating}/5</p>
+                    </div>
+                  </div>
+
+                  {rating.review && (
+                    <p className="mt-3 text-sm text-zinc-300">{rating.review}</p>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        </section>
 
         <div className="grid gap-8 lg:grid-cols-2">
           <section className="rounded-2xl bg-zinc-900 p-8 shadow-lg">

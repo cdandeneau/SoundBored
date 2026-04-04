@@ -44,6 +44,27 @@ type SpotifyTrackResult = {
   image_url: string | null;
 };
 
+type SongRating = {
+  id: string;
+  spotify_track_id: string;
+  track_name: string;
+  artist_name: string;
+  album_name: string | null;
+  image_url: string | null;
+  rating: number;
+  review: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+const ratingOptions = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5];
+
+function formatNotes(rating: number) {
+  const fullNotes = Math.floor(rating);
+  const half = rating % 1 !== 0;
+  return "♪".repeat(fullNotes) + (half ? "◐" : "");
+}
+
 export default function DashboardPage() {
   const router = useRouter();
 
@@ -51,6 +72,7 @@ export default function DashboardPage() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [favoriteTracks, setFavoriteTracks] = useState<FavoriteTrack[]>([]);
   const [favoriteAlbums, setFavoriteAlbums] = useState<FavoriteAlbum[]>([]);
+  const [recentRatings, setRecentRatings] = useState<SongRating[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -204,6 +226,21 @@ export default function DashboardPage() {
       setFavoriteAlbums(albumsData || []);
     }
 
+    const { data: ratingsData, error: ratingsError } = await supabase
+      .from("song_ratings")
+      .select(
+        "id, spotify_track_id, track_name, artist_name, album_name, image_url, rating, review, created_at, updated_at"
+      )
+      .eq("user_id", user.id)
+      .order("updated_at", { ascending: false })
+      .limit(5);
+
+    if (ratingsError) {
+      console.error("Error loading recent ratings:", ratingsError.message);
+    } else {
+      setRecentRatings((ratingsData || []) as SongRating[]);
+    }
+
     setLoading(false);
   }
 
@@ -323,131 +360,197 @@ export default function DashboardPage() {
   }
 
   async function handleAddFavoriteAlbum(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setAlbumMessage("");
+  e.preventDefault();
+  setAlbumMessage("");
 
-    if (!currentUserId) {
-      setAlbumMessage("No logged-in user found.");
-      return;
-    }
-
-    if (!selectedAlbum) {
-      setAlbumMessage("Please select an album from search results.");
-      return;
-    }
-
-    const position = Number(albumPosition);
-
-    if (position < 1 || position > 5) {
-      setAlbumMessage("Position must be between 1 and 5.");
-      return;
-    }
-
-    setAlbumSubmitting(true);
-
-    const { error } = await supabase.from("favorite_albums").upsert(
-      {
-        user_id: currentUserId,
-        spotify_album_id: selectedAlbum.spotify_album_id,
-        album_name: selectedAlbum.album_name,
-        artist_name: selectedAlbum.artist_name,
-        image_url: selectedAlbum.image_url,
-        position,
-      },
-      {
-        onConflict: "user_id,position",
-      }
-    );
-
-    setAlbumSubmitting(false);
-
-    if (error) {
-      setAlbumMessage(error.message);
-      return;
-    }
-
-    const { data: insertedAlbum } = await supabase
-      .from("favorite_albums")
-      .select("id, album_name, artist_name, image_url, position")
-      .eq("user_id", currentUserId)
-      .eq("position", position)
-      .single();
-
-    if (insertedAlbum) {
-      addAlbumLocal(insertedAlbum);
-    }
-
-    setAlbumSearch("");
-    setAlbumResults([]);
-    setSelectedAlbum(null);
-    setAlbumPosition("1");
-    setAlbumMessage("Favorite album saved.");
-    setShowAlbumForm(false);
+  if (!currentUserId) {
+    setAlbumMessage("No logged-in user found.");
+    return;
   }
+
+  if (!selectedAlbum) {
+    setAlbumMessage("Please select an album from search results.");
+    return;
+  }
+
+  const position = Number(albumPosition);
+
+  if (position < 1 || position > 5) {
+    setAlbumMessage("Position must be between 1 and 5.");
+    return;
+  }
+
+  setAlbumSubmitting(true);
+
+  const albumsToShift = [...favoriteAlbums]
+    .filter((album) => album.position >= position)
+    .sort((a, b) => b.position - a.position);
+
+  for (const album of albumsToShift) {
+    if (album.position === 5) {
+      const { error: deleteError } = await supabase
+        .from("favorite_albums")
+        .delete()
+        .eq("id", album.id);
+
+      if (deleteError) {
+        setAlbumSubmitting(false);
+        setAlbumMessage(deleteError.message);
+        return;
+      }
+    } else {
+      const { error: shiftError } = await supabase
+        .from("favorite_albums")
+        .update({ position: album.position + 1 })
+        .eq("id", album.id);
+
+      if (shiftError) {
+        setAlbumSubmitting(false);
+        setAlbumMessage(shiftError.message);
+        return;
+      }
+    }
+  }
+
+  const { data: insertedAlbum, error } = await supabase
+    .from("favorite_albums")
+    .insert({
+      user_id: currentUserId,
+      spotify_album_id: selectedAlbum.spotify_album_id,
+      album_name: selectedAlbum.album_name,
+      artist_name: selectedAlbum.artist_name,
+      image_url: selectedAlbum.image_url,
+      position,
+    })
+    .select("id, album_name, artist_name, image_url, position")
+    .single();
+
+  setAlbumSubmitting(false);
+
+  if (error) {
+    setAlbumMessage(error.message);
+    return;
+  }
+
+  setFavoriteAlbums((prev) => {
+    const shifted = prev
+      .filter((album) => album.position < position)
+      .concat(
+        prev
+          .filter((album) => album.position >= position && album.position < 5)
+          .map((album) => ({
+            ...album,
+            position: album.position + 1,
+          }))
+      );
+
+    return [...shifted, insertedAlbum].sort((a, b) => a.position - b.position);
+  });
+
+  setAlbumSearch("");
+  setAlbumResults([]);
+  setSelectedAlbum(null);
+  setAlbumPosition("1");
+  setAlbumMessage("Favorite album saved.");
+  setShowAlbumForm(false);
+}
 
   async function handleAddFavoriteTrack(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setTrackMessage("");
+  e.preventDefault();
+  setTrackMessage("");
 
-    if (!currentUserId) {
-      setTrackMessage("No logged-in user found.");
-      return;
-    }
-
-    if (!selectedTrack) {
-      setTrackMessage("Please select a track from search results.");
-      return;
-    }
-
-    const position = Number(trackPosition);
-
-    if (position < 1 || position > 5) {
-      setTrackMessage("Position must be between 1 and 5.");
-      return;
-    }
-
-    setTrackSubmitting(true);
-
-    const { error } = await supabase.from("favorite_tracks").upsert(
-      {
-        user_id: currentUserId,
-        spotify_track_id: selectedTrack.spotify_track_id,
-        track_name: selectedTrack.track_name,
-        artist_name: selectedTrack.artist_name,
-        album_name: selectedTrack.album_name,
-        image_url: selectedTrack.image_url,
-        position,
-      },
-      {
-        onConflict: "user_id,position",
-      }
-    );
-
-    setTrackSubmitting(false);
-
-    if (error) {
-      setTrackMessage(error.message);
-      return;
-    }
-
-    const { data: insertedTrack } = await supabase
-      .from("favorite_tracks")
-      .select("id, track_name, artist_name, album_name, image_url, position")
-      .eq("user_id", currentUserId)
-      .eq("position", position)
-      .single();
-
-    if (insertedTrack) {
-      addTrackLocal(insertedTrack);
-    }
-
-    setTrackSearch("");
-    setTrackResults([]);
-    setSelectedTrack(null);
-    setTrackPosition("1");
-    setTrackMessage("Favorite track saved.");
-    setShowTrackForm(false);
+  if (!currentUserId) {
+    setTrackMessage("No logged-in user found.");
+    return;
   }
+
+  if (!selectedTrack) {
+    setTrackMessage("Please select a track from search results.");
+    return;
+  }
+
+  const position = Number(trackPosition);
+
+  if (position < 1 || position > 5) {
+    setTrackMessage("Position must be between 1 and 5.");
+    return;
+  }
+
+  setTrackSubmitting(true);
+
+  const tracksToShift = [...favoriteTracks]
+    .filter((track) => track.position >= position)
+    .sort((a, b) => b.position - a.position);
+
+  for (const track of tracksToShift) {
+    if (track.position === 5) {
+      const { error: deleteError } = await supabase
+        .from("favorite_tracks")
+        .delete()
+        .eq("id", track.id);
+
+      if (deleteError) {
+        setTrackSubmitting(false);
+        setTrackMessage(deleteError.message);
+        return;
+      }
+    } else {
+      const { error: shiftError } = await supabase
+        .from("favorite_tracks")
+        .update({ position: track.position + 1 })
+        .eq("id", track.id);
+
+      if (shiftError) {
+        setTrackSubmitting(false);
+        setTrackMessage(shiftError.message);
+        return;
+      }
+    }
+  }
+
+  const { data: insertedTrack, error } = await supabase
+    .from("favorite_tracks")
+    .insert({
+      user_id: currentUserId,
+      spotify_track_id: selectedTrack.spotify_track_id,
+      track_name: selectedTrack.track_name,
+      artist_name: selectedTrack.artist_name,
+      album_name: selectedTrack.album_name,
+      image_url: selectedTrack.image_url,
+      position,
+    })
+    .select("id, track_name, artist_name, album_name, image_url, position")
+    .single();
+
+  setTrackSubmitting(false);
+
+  if (error) {
+    setTrackMessage(error.message);
+    return;
+  }
+
+  setFavoriteTracks((prev) => {
+    const shifted = prev
+      .filter((track) => track.position < position)
+      .concat(
+        prev
+          .filter((track) => track.position >= position && track.position < 5)
+          .map((track) => ({
+            ...track,
+            position: track.position + 1,
+          }))
+      );
+
+    return [...shifted, insertedTrack].sort((a, b) => a.position - b.position);
+  });
+
+  setTrackSearch("");
+  setTrackResults([]);
+  setSelectedTrack(null);
+  setTrackPosition("1");
+  setTrackMessage("Favorite track saved.");
+  setShowTrackForm(false);
+}
 
   async function handleDeleteFavoriteAlbum(id: string) {
     setBusyAction(`delete-album-${id}`);
@@ -620,17 +723,18 @@ export default function DashboardPage() {
 
             <div className="flex gap-3">
               <Link
-                href={`/profile/${profile?.username}`}
-                className="rounded-lg border border-zinc-700 px-6 py-3 text-sm font-semibold text-zinc-300 hover:bg-zinc-800"
-              >
-                View Public Profile
-              </Link>
-              <Link
                 href="/rate"
                 className="rounded-lg border border-zinc-700 px-6 py-3 text-sm font-semibold text-zinc-300 hover:bg-zinc-800"
               >
                 Rate a Song
               </Link>
+              <Link
+                href={`/profile/${profile?.username}`}
+                className="rounded-lg border border-zinc-700 px-6 py-3 text-sm font-semibold text-zinc-300 hover:bg-zinc-800"
+              >
+                View Public Profile
+              </Link>
+
               <button
                 onClick={handleLogout}
                 className="rounded-lg bg-green-500 px-6 py-3 font-semibold text-black transition hover:bg-green-600"
@@ -699,6 +803,67 @@ export default function DashboardPage() {
             )}
           </div>
         </div>
+
+        <section className="rounded-2xl bg-zinc-900 p-8 shadow-lg">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-2xl font-bold">My Recent Ratings</h2>
+            <Link
+              href="/rate"
+              className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-800"
+            >
+              Rate a Song
+            </Link>
+          </div>
+
+          <div className="space-y-3">
+            {recentRatings.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-zinc-700 p-6 text-center text-zinc-400">
+                No song ratings yet.
+              </div>
+            ) : (
+              recentRatings.map((rating) => (
+                <div key={rating.id} className="rounded-xl bg-zinc-800/60 p-4">
+                  <div className="flex items-center gap-4">
+                    {rating.image_url ? (
+                      <img
+                        src={rating.image_url}
+                        alt={rating.track_name}
+                        className="h-16 w-16 rounded-lg object-cover"
+                      />
+                    ) : (
+                      <div className="h-16 w-16 rounded-lg bg-zinc-700" />
+                    )}
+
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-semibold text-white">
+                        {rating.track_name}
+                      </p>
+                      <p className="truncate text-sm text-zinc-400">
+                        {rating.artist_name}
+                      </p>
+                      {rating.album_name && (
+                        <p className="truncate text-xs text-zinc-500">
+                          {rating.album_name}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="text-right">
+                      <p className="text-xl font-semibold text-green-400">
+                        {formatNotes(rating.rating)}
+                      </p>
+                      <p className="text-sm text-zinc-400">{rating.rating}/5</p>
+                    </div>
+                  </div>
+
+                  {rating.review && (
+                    <p className="mt-3 text-sm text-zinc-300">{rating.review}</p>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        </section>
 
         <div className="grid gap-8 lg:grid-cols-2">
           <section className="rounded-2xl bg-zinc-900 p-8 shadow-lg">
