@@ -1,9 +1,9 @@
 "use client";
 
-import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../utils/supabase/supabaseClient";
+import TopNav from "../../components/TopNav";
 
 type SpotifyTrackResult = {
   spotify_track_id: string;
@@ -24,6 +24,8 @@ function formatNotes(rating: number) {
 export default function RateSongPage() {
   const router = useRouter();
 
+  const [myUsername, setMyUsername] = useState<string | null>(null);
+
   const [trackSearch, setTrackSearch] = useState("");
   const [trackResults, setTrackResults] = useState<SpotifyTrackResult[]>([]);
   const [trackSearchLoading, setTrackSearchLoading] = useState(false);
@@ -35,6 +37,31 @@ export default function RateSongPage() {
   const [review, setReview] = useState("");
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    async function loadCurrentProfile() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        router.push("/login");
+        return;
+      }
+
+      const { data: profileData } = await supabase
+        .from("profiles")
+        .select("username")
+        .eq("id", user.id)
+        .single();
+
+      if (profileData?.username) {
+        setMyUsername(profileData.username);
+      }
+    }
+
+    loadCurrentProfile();
+  }, [router]);
 
   async function handleTrackSearch(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -137,20 +164,14 @@ export default function RateSongPage() {
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-8">
         <div className="flex items-center justify-between">
           <h1 className="text-4xl font-bold">Rate a Song</h1>
-          <div className="flex gap-3">
-            <Link
-              href="/dashboard"
-              className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-800"
-            >
-              Back to Dashboard
-            </Link>
-            <Link
-              href="/feed"
-              className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-800"
-            >
-              Feed
-            </Link>
-          </div>
+
+          <TopNav
+            showMyProfile
+            myProfileUsername={myUsername}
+            showFeed
+            showUsers
+            showRate={false}
+          />
         </div>
 
         <section className="rounded-2xl bg-zinc-900 p-8 shadow-lg">
@@ -274,9 +295,7 @@ export default function RateSongPage() {
               <p className="text-2xl font-semibold text-green-400">
                 {formatNotes(Number(rating))}
               </p>
-              <p className="mt-1 text-sm text-zinc-400">
-                {Number(rating)} / 5
-              </p>
+              <p className="mt-1 text-sm text-zinc-400">{Number(rating)} / 5</p>
             </div>
 
             <div>

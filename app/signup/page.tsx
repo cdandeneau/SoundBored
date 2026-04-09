@@ -63,7 +63,7 @@ export default function SignupPage() {
     }
 
     setMessage("Account created successfully.");
-    router.push("/dashboard");
+    router.push(`/profile/${cleanUsername}`);
   }
 
   return (

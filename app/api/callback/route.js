@@ -76,10 +76,10 @@ export async function GET(request) {
 
     console.log('Saved to Supabase:', data);
 
-    return NextResponse.redirect(new URL('/dashboard?status=success', request.url));
+    return NextResponse.redirect(new URL('/feed?status=success', request.url));
 
   } catch (error) {
     console.error('Sync Error:', error);
-    return NextResponse.redirect(new URL('/dashboard?status=error', request.url));
+    return NextResponse.redirect(new URL('/feed?status=error', request.url));
   }
 }

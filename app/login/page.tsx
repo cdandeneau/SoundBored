@@ -26,7 +26,21 @@ export default function LoginPage() {
       return;
     }
 
-    router.push("/dashboard");
+        const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (user) {
+      const { data: profileData } = await supabase
+        .from("profiles")
+        .select("username")
+        .eq("id", user.id)
+        .single();
+
+      if (profileData?.username) {
+        router.push(`/profile/${profileData.username}`);
+      }
+    }
   }
 
   return (
