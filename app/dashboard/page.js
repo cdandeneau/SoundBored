@@ -53,7 +53,7 @@ export default function Dashboard() {
   }
 
   return (
-    <main className="min-h-screen bg-black text-white px-6 py-8">
+    <main className="min-h-screen text-white px-6 py-8">
       <div className="max-w-4xl mx-auto">
         <div className="bg-zinc-900 p-8 rounded-2xl shadow-lg text-center mb-8">
           <h1 className="text-4xl font-bold mb-4">Welcome to SoundBored</h1>

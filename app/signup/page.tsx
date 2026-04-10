@@ -67,7 +67,7 @@ export default function SignupPage() {
   }
 
   return (
-    <main className="min-h-screen bg-black text-white flex items-center justify-center px-6">
+    <main className="min-h-screen text-white flex items-center justify-center px-6">
       <div className="w-full max-w-md bg-zinc-900 p-8 rounded-2xl shadow-lg">
         <h1 className="text-3xl font-bold mb-6 text-center">Sign Up</h1>
 

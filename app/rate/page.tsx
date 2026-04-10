@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../utils/supabase/supabaseClient";
 import TopNav from "../../components/TopNav";
+import NoteRating from "../components/NoteRating";
 
 type SpotifyTrackResult = {
   spotify_track_id: string;
@@ -15,10 +16,10 @@ type SpotifyTrackResult = {
 
 const ratingOptions = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5];
 
-function formatNotes(rating: number) {
+function formatNotesText(rating: number) {
   const fullNotes = Math.floor(rating);
   const half = rating % 1 !== 0;
-  return "♪".repeat(fullNotes) + (half ? "◐" : "");
+  return "♪".repeat(fullNotes) + (half ? "½" : "");
 }
 
 export default function RateSongPage() {
@@ -160,7 +161,7 @@ export default function RateSongPage() {
   }
 
   return (
-    <main className="min-h-screen bg-black px-6 py-12 text-white">
+    <main className="min-h-screen px-6 py-12 text-white">
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-8">
         <div className="flex items-center justify-between">
           <h1 className="text-4xl font-bold">Rate a Song</h1>
@@ -284,7 +285,7 @@ export default function RateSongPage() {
               >
                 {ratingOptions.map((value) => (
                   <option key={value} value={value}>
-                    {value} — {formatNotes(value)}
+                    {value} — {formatNotesText(value)}
                   </option>
                 ))}
               </select>
@@ -293,7 +294,7 @@ export default function RateSongPage() {
             <div className="rounded-xl bg-zinc-800/60 p-4">
               <p className="mb-2 text-sm text-zinc-400">Preview</p>
               <p className="text-2xl font-semibold text-green-400">
-                {formatNotes(Number(rating))}
+                <NoteRating rating={Number(rating)} />
               </p>
               <p className="mt-1 text-sm text-zinc-400">{Number(rating)} / 5</p>
             </div>

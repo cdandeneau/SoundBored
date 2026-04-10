@@ -5,6 +5,13 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { supabase } from "../../../../utils/supabase/supabaseClient";
 import TopNav from "../../../../components/TopNav";
+import NoteRating from "../../../components/NoteRating";
+
+function formatNotesText(rating: number) {
+  const fullNotes = Math.floor(rating);
+  const half = rating % 1 !== 0;
+  return "♪".repeat(fullNotes) + (half ? "½" : "");
+}
 
 type Profile = {
   id: string;
@@ -27,11 +34,7 @@ type SongRating = {
   updated_at: string;
 };
 
-function formatNotes(rating: number) {
-  const fullNotes = Math.floor(rating);
-  const half = rating % 1 !== 0;
-  return "♪".repeat(fullNotes) + (half ? "◐" : "");
-}
+
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString(undefined, {
@@ -51,12 +54,25 @@ export default function ProfileRatingsPage() {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [isOwnProfile, setIsOwnProfile] = useState(false);
+
+  const [editingRatingId, setEditingRatingId] = useState<string | null>(null);
+  const [editRatingValue, setEditRatingValue] = useState("");
+  const [editReviewValue, setEditReviewValue] = useState("");
+  const [ratingBusy, setRatingBusy] = useState("");
+
   useEffect(() => {
     async function loadRatingsPage() {
       if (!username) return;
 
       setLoading(true);
       setNotFound(false);
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      setCurrentUserId(user?.id || null);
 
       const { data: profileData, error: profileError } = await supabase
         .from("profiles")
@@ -71,6 +87,8 @@ export default function ProfileRatingsPage() {
       }
 
       setProfile(profileData);
+
+      setIsOwnProfile(!!user?.id && user.id === profileData.id);
 
       const { data: ratingsData, error: ratingsError } = await supabase
         .from("song_ratings")
@@ -92,6 +110,74 @@ export default function ProfileRatingsPage() {
 
     loadRatingsPage();
   }, [username]);
+
+  function startEditRating(rating: SongRating) {
+    setEditingRatingId(rating.id);
+    setEditRatingValue(String(rating.rating));
+    setEditReviewValue(rating.review || "");
+  }
+
+  function cancelEditRating() {
+    setEditingRatingId(null);
+    setEditRatingValue("");
+    setEditReviewValue("");
+  }
+
+  async function handleSaveRating(ratingId: string) {
+    if (!currentUserId || !isOwnProfile) return;
+    setRatingBusy(`save-${ratingId}`);
+
+    const { error } = await supabase
+      .from("song_ratings")
+      .update({
+        rating: Number(editRatingValue),
+        review: editReviewValue.trim() || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", ratingId)
+      .eq("user_id", currentUserId);
+
+    setRatingBusy("");
+
+    if (error) {
+      console.error("Update rating error:", error.message);
+      return;
+    }
+
+    setRatings((prev) =>
+      prev.map((r) =>
+        r.id === ratingId
+          ? {
+              ...r,
+              rating: Number(editRatingValue),
+              review: editReviewValue.trim() || null,
+              updated_at: new Date().toISOString(),
+            }
+          : r
+      )
+    );
+    setEditingRatingId(null);
+  }
+
+  async function handleDeleteRating(ratingId: string) {
+    if (!currentUserId || !isOwnProfile) return;
+    setRatingBusy(`delete-${ratingId}`);
+
+    const { error } = await supabase
+      .from("song_ratings")
+      .delete()
+      .eq("id", ratingId)
+      .eq("user_id", currentUserId);
+
+    setRatingBusy("");
+
+    if (error) {
+      console.error("Delete rating error:", error.message);
+      return;
+    }
+
+    setRatings((prev) => prev.filter((r) => r.id !== ratingId));
+  }
 
   const stats = useMemo(() => {
     const total = ratings.length;
@@ -116,7 +202,7 @@ export default function ProfileRatingsPage() {
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-black text-white flex items-center justify-center overflow-x-hidden">
+      <main className="min-h-screen text-white flex items-center justify-center overflow-x-hidden">
         <p className="text-zinc-400 text-lg">Loading ratings...</p>
       </main>
     );
@@ -124,7 +210,7 @@ export default function ProfileRatingsPage() {
 
   if (notFound || !profile) {
     return (
-      <main className="min-h-screen bg-black text-white flex items-center justify-center px-6 overflow-x-hidden">
+      <main className="min-h-screen text-white flex items-center justify-center px-6 overflow-x-hidden">
         <div className="rounded-2xl bg-zinc-900 p-8 text-center shadow-lg">
           <h1 className="text-3xl font-bold">Profile not found</h1>
           <p className="mt-3 text-zinc-400">
@@ -136,16 +222,55 @@ export default function ProfileRatingsPage() {
   }
 
   return (
-    <main className="min-h-screen overflow-x-hidden bg-black px-6 py-10 text-white">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-8">
-        <section className="border-b border-zinc-800 pb-6">
-          <p className="text-xs uppercase tracking-[0.25em] text-zinc-500">
-            Reviews
-          </p>
-          <h1 className="mt-2 text-4xl font-bold text-white">
-            {profile.display_name || profile.username}
-          </h1>
-          <p className="mt-2 text-zinc-400">@{profile.username}</p>
+    <main className="min-h-screen overflow-x-hidden px-6 py-10 text-white">
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-8">
+        <section className="rounded-2xl bg-zinc-900 p-6 shadow-lg">
+          <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
+            <div className="flex items-center gap-4">
+              {profile.avatar_url ? (
+                <img
+                  src={profile.avatar_url}
+                  alt={profile.username}
+                  className="h-16 w-16 rounded-full object-cover"
+                />
+              ) : (
+                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-zinc-800 text-2xl font-bold text-green-400">
+                  {profile.display_name?.[0]?.toUpperCase() ||
+                    profile.username?.[0]?.toUpperCase() ||
+                    "U"}
+                </div>
+              )}
+
+              <div>
+                <p className="text-xs uppercase tracking-[0.25em] text-zinc-500">
+                  Reviews
+                </p>
+                <h1 className="text-2xl font-bold text-white">
+                  {profile.display_name || profile.username}
+                </h1>
+                <p className="text-sm text-zinc-400">@{profile.username}</p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-6 text-center">
+              <div>
+                <p className="text-xs text-zinc-500">Ratings</p>
+                <p className="text-xl font-bold text-white">{stats.total}</p>
+              </div>
+              <div>
+                <p className="text-xs text-zinc-500">Average</p>
+                <p className="text-xl font-bold text-green-400">{stats.average}</p>
+              </div>
+              <div>
+                <p className="text-xs text-zinc-500">Reviews</p>
+                <p className="text-xl font-bold text-white">{stats.withReviews}</p>
+              </div>
+              <div>
+                <p className="text-xs text-zinc-500">Last reviewed</p>
+                <p className="text-sm font-semibold text-white">{stats.latestDate}</p>
+              </div>
+            </div>
+          </div>
 
           <div className="mt-5 flex flex-wrap gap-3">
             <TopNav
@@ -164,16 +289,15 @@ export default function ProfileRatingsPage() {
           </div>
         </section>
 
-        <div className="grid gap-8 xl:grid-cols-4">
-          <section className="min-w-0 xl:col-span-3">
-            <div className="mb-4 flex items-center justify-between border-b border-zinc-800 pb-3">
-              <h2 className="text-sm uppercase tracking-[0.25em] text-zinc-400">
-                All Song Ratings
-              </h2>
-              <p className="text-sm text-zinc-500">
-                {ratings.length} {ratings.length === 1 ? "entry" : "entries"}
-              </p>
-            </div>
+        <section>
+          <div className="mb-4 flex items-center justify-between border-b border-zinc-800 pb-3">
+            <h2 className="text-sm uppercase tracking-[0.25em] text-zinc-400">
+              All Song Ratings
+            </h2>
+            <p className="text-sm text-zinc-500">
+              {ratings.length} {ratings.length === 1 ? "entry" : "entries"}
+            </p>
+          </div>
 
             {ratings.length === 0 ? (
               <div className="rounded-xl border border-dashed border-zinc-700 p-6 text-center text-zinc-400">
@@ -215,7 +339,7 @@ export default function ProfileRatingsPage() {
 
                           <div className="text-left md:text-right">
                             <p className="text-xl font-semibold text-green-400">
-                              {formatNotes(rating.rating)}
+                              <NoteRating rating={rating.rating} />
                             </p>
                             <p className="mt-1 text-sm text-zinc-400">
                               {rating.rating}/5 · Reviewed{" "}
@@ -227,7 +351,7 @@ export default function ProfileRatingsPage() {
                         {rating.review?.trim() ? (
                           <div className="mt-4 max-w-4xl">
                             <p className="text-lg leading-8 text-zinc-200">
-                              {rating.review}
+                              &ldquo;{rating.review}&rdquo;
                             </p>
                           </div>
                         ) : (
@@ -237,6 +361,88 @@ export default function ProfileRatingsPage() {
                             </p>
                           </div>
                         )}
+
+                        {isOwnProfile && editingRatingId === rating.id ? (
+                          <div className="mt-4 space-y-3 rounded-xl border border-zinc-800 bg-zinc-950/50 p-4">
+                            <div>
+                              <label className="mb-1 block text-xs text-zinc-400">Rating</label>
+                              <select
+                                value={editRatingValue}
+                                onChange={(e) => setEditRatingValue(e.target.value)}
+                                className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white outline-none"
+                              >
+                                {[0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5].map((v) => (
+                                  <option key={v} value={v}>{v} — {formatNotesText(v)}</option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="mb-1 block text-xs text-zinc-400">Review</label>
+                              <textarea
+                                value={editReviewValue}
+                                onChange={(e) => setEditReviewValue(e.target.value)}
+                                rows={3}
+                                placeholder="Write your review..."
+                                className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white outline-none"
+                              />
+                            </div>
+
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => handleSaveRating(rating.id)}
+                                disabled={ratingBusy !== ""}
+                                className="rounded-lg bg-green-500 px-4 py-2 text-sm font-semibold text-black hover:bg-green-600 disabled:opacity-50"
+                              >
+                                {ratingBusy === `save-${rating.id}` ? "Saving..." : "Save"}
+                              </button>
+                              <button
+                                onClick={cancelEditRating}
+                                className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-800"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : isOwnProfile ? (
+                          <div className="mt-4 flex items-center gap-2">
+                            <button
+                              onClick={() => startEditRating(rating)}
+                              disabled={ratingBusy !== ""}
+                              className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+                            >
+                              ✎ Edit
+                            </button>
+                            <button
+                              onClick={() => handleDeleteRating(rating.id)}
+                              disabled={ratingBusy !== ""}
+                              className="rounded-lg border border-red-700 px-3 py-1.5 text-sm text-red-300 hover:bg-red-950/40 disabled:opacity-50"
+                            >
+                              {ratingBusy === `delete-${rating.id}` ? "Deleting..." : "✕ Delete"}
+                            </button>
+                            {rating.spotify_track_id && (
+                              <a
+                                href={`https://open.spotify.com/track/${rating.spotify_track_id}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="ml-auto text-sm text-green-400 hover:underline"
+                              >
+                                Listen on Spotify
+                              </a>
+                            )}
+                          </div>
+                        ) : rating.spotify_track_id ? (
+                          <div className="mt-4 flex justify-end">
+                            <a
+                              href={`https://open.spotify.com/track/${rating.spotify_track_id}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-sm text-green-400 hover:underline"
+                            >
+                              Listen on Spotify
+                            </a>
+                          </div>
+                        ) : null}
                       </div>
                     </div>
                   </article>
@@ -244,87 +450,6 @@ export default function ProfileRatingsPage() {
               </div>
             )}
           </section>
-
-          <aside className="xl:col-span-1">
-            <div className="space-y-4 xl:sticky xl:top-8">
-              <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-                <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                  Profile
-                </p>
-                <h3 className="mt-3 text-2xl font-bold text-white">
-                  {profile.display_name || profile.username}
-                </h3>
-                <p className="mt-1 text-zinc-400">@{profile.username}</p>
-                <p className="mt-4 text-sm leading-6 text-zinc-300">
-                  {profile.bio?.trim() || "No bio yet."}
-                </p>
-              </div>
-
-              <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-                <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                  Stats
-                </p>
-
-                <div className="mt-4 space-y-5">
-                  <div>
-                    <p className="text-sm text-zinc-500">Total ratings</p>
-                    <p className="mt-1 text-2xl font-bold text-white">
-                      {stats.total}
-                    </p>
-                  </div>
-
-                  <div>
-                    <p className="text-sm text-zinc-500">Average rating</p>
-                    <p className="mt-1 text-2xl font-bold text-green-400">
-                      {stats.average}
-                    </p>
-                  </div>
-
-                  <div>
-                    <p className="text-sm text-zinc-500">Reviews written</p>
-                    <p className="mt-1 text-2xl font-bold text-white">
-                      {stats.withReviews}
-                    </p>
-                  </div>
-
-                  <div>
-                    <p className="text-sm text-zinc-500">Last reviewed</p>
-                    <p className="mt-1 text-base font-semibold text-white">
-                      {stats.latestDate}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-                <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                  Quick Links
-                </p>
-
-                <div className="mt-4 flex flex-col gap-3">
-                  <Link
-                    href={`/profile/${profile.username}`}
-                    className="rounded-lg border border-zinc-700 px-4 py-3 text-sm font-semibold text-zinc-300 hover:bg-zinc-800"
-                  >
-                    View main profile
-                  </Link>
-                  <Link
-                    href="/users"
-                    className="rounded-lg border border-zinc-700 px-4 py-3 text-sm font-semibold text-zinc-300 hover:bg-zinc-800"
-                  >
-                    Find more users
-                  </Link>
-                  <Link
-                    href="/feed"
-                    className="rounded-lg border border-zinc-700 px-4 py-3 text-sm font-semibold text-zinc-300 hover:bg-zinc-800"
-                  >
-                    Go to feed
-                  </Link>
-                </div>
-              </div>
-            </div>
-          </aside>
-        </div>
       </div>
     </main>
   );

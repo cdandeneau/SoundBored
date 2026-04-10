@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "../../utils/supabase/supabaseClient";
 import TopNav from "../../components/TopNav";
+import NoteRating from "../components/NoteRating";
 
 type SongRating = {
   id: string;
@@ -24,17 +25,14 @@ type ProfileSummary = {
   id: string;
   username: string;
   display_name: string | null;
+  avatar_url: string | null;
 };
 
 type FeedItem = SongRating & {
   profile: ProfileSummary | null;
 };
 
-function formatNotes(rating: number) {
-  const fullNotes = Math.floor(rating);
-  const half = rating % 1 !== 0;
-  return "♪".repeat(fullNotes) + (half ? "◐" : "");
-}
+
 
 function formatTimeAgo(iso: string) {
   const now = new Date().getTime();
@@ -141,7 +139,7 @@ export default function FeedPage() {
       if (ratingUsers.length > 0) {
         const { data: profileData, error: profileError } = await supabase
           .from("profiles")
-          .select("id, username, display_name")
+          .select("id, username, display_name, avatar_url")
           .in("id", ratingUsers);
 
         if (profileError) {
@@ -169,14 +167,14 @@ export default function FeedPage() {
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-black text-white flex items-center justify-center">
+      <main className="min-h-screen text-white flex items-center justify-center">
         <p className="text-lg text-zinc-400">Loading feed...</p>
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-black px-6 py-12 text-white">
+    <main className="min-h-screen px-6 py-12 text-white">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-8">
         <div className="rounded-2xl bg-zinc-900 p-8 shadow-lg">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -251,7 +249,21 @@ export default function FeedPage() {
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
                       <div>
-                        <p className="text-sm text-zinc-400">
+                        <div className="flex items-center gap-2">
+                          {item.profile?.avatar_url ? (
+                            <img
+                              src={item.profile.avatar_url}
+                              alt={item.profile.username}
+                              className="h-6 w-6 rounded-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-zinc-800 text-xs font-bold text-green-400">
+                              {item.profile?.display_name?.[0]?.toUpperCase() ||
+                                item.profile?.username?.[0]?.toUpperCase() ||
+                                "U"}
+                            </div>
+                          )}
+                          <p className="text-sm text-zinc-400">
                           {item.profile?.username ? (
                             <>
                               <Link
@@ -269,6 +281,7 @@ export default function FeedPage() {
                             <span className="text-zinc-500">Unknown user</span>
                           )}
                         </p>
+                        </div>
 
                         <h2 className="mt-1 truncate text-xl font-semibold text-white">
                           {item.track_name}
@@ -285,7 +298,7 @@ export default function FeedPage() {
 
                       <div className="shrink-0 text-left sm:text-right">
                         <p className="text-2xl font-semibold text-green-400">
-                          {formatNotes(item.rating)}
+                          <NoteRating rating={item.rating} />
                         </p>
                         <p className="text-sm text-zinc-400">
                           {item.rating}/5

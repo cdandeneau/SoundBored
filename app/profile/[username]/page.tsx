@@ -5,6 +5,13 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "../../../utils/supabase/supabaseClient";
 import TopNav from "../../../components/TopNav";
+import NoteRating from "../../components/NoteRating";
+
+function formatNotesText(rating: number) {
+  const fullNotes = Math.floor(rating);
+  const half = rating % 1 !== 0;
+  return "♪".repeat(fullNotes) + (half ? "½" : "");
+}
 
 type Profile = {
   id: string;
@@ -16,6 +23,7 @@ type Profile = {
 
 type FavoriteTrack = {
   id: string;
+  spotify_track_id: string;
   track_name: string;
   artist_name: string;
   album_name: string | null;
@@ -25,6 +33,7 @@ type FavoriteTrack = {
 
 type FavoriteAlbum = {
   id: string;
+  spotify_album_id: string;
   album_name: string;
   artist_name: string;
   image_url: string | null;
@@ -59,11 +68,7 @@ type SongRating = {
   updated_at: string;
 };
 
-function formatNotes(rating: number) {
-  const fullNotes = Math.floor(rating);
-  const half = rating % 1 !== 0;
-  return "♪".repeat(fullNotes) + (half ? "◐" : "");
-}
+
 
 export default function ProfilePage() {
   const params = useParams();
@@ -92,6 +97,12 @@ export default function ProfilePage() {
   const [bioSaving, setBioSaving] = useState(false);
   const [isEditingBio, setIsEditingBio] = useState(false);
 
+  const [isEditingDisplayName, setIsEditingDisplayName] = useState(false);
+  const [displayNameDraft, setDisplayNameDraft] = useState("");
+  const [displayNameSaving, setDisplayNameSaving] = useState(false);
+
+  const [avatarUploading, setAvatarUploading] = useState(false);
+
   const [showAlbumForm, setShowAlbumForm] = useState(false);
   const [albumPosition, setAlbumPosition] = useState("1");
   const [albumMessage, setAlbumMessage] = useState("");
@@ -113,6 +124,11 @@ export default function ProfilePage() {
     useState<SpotifyTrackResult | null>(null);
 
   const [busyAction, setBusyAction] = useState("");
+
+  const [editingRatingId, setEditingRatingId] = useState<string | null>(null);
+  const [editRatingValue, setEditRatingValue] = useState("");
+  const [editReviewValue, setEditReviewValue] = useState("");
+  const [ratingBusy, setRatingBusy] = useState("");
 
   function reorderAlbumsLocal(albumAId: string, albumBId: string) {
     setFavoriteAlbums((prev) => {
@@ -202,7 +218,7 @@ export default function ProfilePage() {
 
     const { data: tracksData, error: tracksError } = await supabase
       .from("favorite_tracks")
-      .select("id, track_name, artist_name, album_name, image_url, position")
+      .select("id, spotify_track_id, track_name, artist_name, album_name, image_url, position")
       .eq("user_id", profileData.id)
       .order("position", { ascending: true });
 
@@ -214,7 +230,7 @@ export default function ProfilePage() {
 
     const { data: albumsData, error: albumsError } = await supabase
       .from("favorite_albums")
-      .select("id, album_name, artist_name, image_url, position")
+      .select("id, spotify_album_id, album_name, artist_name, image_url, position")
       .eq("user_id", profileData.id)
       .order("position", { ascending: true });
 
@@ -353,6 +369,133 @@ export default function ProfilePage() {
     setIsEditingBio(false);
   }
 
+  async function handleSaveDisplayName() {
+    if (!currentUserId || !isOwnProfile) return;
+    setDisplayNameSaving(true);
+
+    const cleaned = displayNameDraft.trim();
+
+    const { error } = await supabase
+      .from("profiles")
+      .update({ display_name: cleaned || null })
+      .eq("id", currentUserId);
+
+    setDisplayNameSaving(false);
+
+    if (error) return;
+
+    setProfile((prev) => (prev ? { ...prev, display_name: cleaned || null } : prev));
+    setIsEditingDisplayName(false);
+  }
+
+  async function handleAvatarUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !currentUserId || !isOwnProfile) return;
+
+    setAvatarUploading(true);
+
+    const fileExt = file.name.split(".").pop();
+    const filePath = `${currentUserId}/avatar.${fileExt}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("avatars")
+      .upload(filePath, file, { upsert: true });
+
+    if (uploadError) {
+      console.error("Upload error:", uploadError.message);
+      setAvatarUploading(false);
+      return;
+    }
+
+    const { data: publicUrlData } = supabase.storage
+      .from("avatars")
+      .getPublicUrl(filePath);
+
+    const avatarUrl = `${publicUrlData.publicUrl}?t=${Date.now()}`;
+
+    const { error: updateError } = await supabase
+      .from("profiles")
+      .update({ avatar_url: avatarUrl })
+      .eq("id", currentUserId);
+
+    setAvatarUploading(false);
+
+    if (updateError) {
+      console.error("Profile update error:", updateError.message);
+      return;
+    }
+
+    setProfile((prev) => (prev ? { ...prev, avatar_url: avatarUrl } : prev));
+  }
+
+  function startEditRating(rating: SongRating) {
+    setEditingRatingId(rating.id);
+    setEditRatingValue(String(rating.rating));
+    setEditReviewValue(rating.review || "");
+  }
+
+  function cancelEditRating() {
+    setEditingRatingId(null);
+    setEditRatingValue("");
+    setEditReviewValue("");
+  }
+
+  async function handleSaveRating(ratingId: string) {
+    if (!currentUserId || !isOwnProfile) return;
+    setRatingBusy(`save-${ratingId}`);
+
+    const { error } = await supabase
+      .from("song_ratings")
+      .update({
+        rating: Number(editRatingValue),
+        review: editReviewValue.trim() || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", ratingId)
+      .eq("user_id", currentUserId);
+
+    setRatingBusy("");
+
+    if (error) {
+      console.error("Update rating error:", error.message);
+      return;
+    }
+
+    setRecentRatings((prev) =>
+      prev.map((r) =>
+        r.id === ratingId
+          ? {
+              ...r,
+              rating: Number(editRatingValue),
+              review: editReviewValue.trim() || null,
+              updated_at: new Date().toISOString(),
+            }
+          : r
+      )
+    );
+    setEditingRatingId(null);
+  }
+
+  async function handleDeleteRating(ratingId: string) {
+    if (!currentUserId || !isOwnProfile) return;
+    setRatingBusy(`delete-${ratingId}`);
+
+    const { error } = await supabase
+      .from("song_ratings")
+      .delete()
+      .eq("id", ratingId)
+      .eq("user_id", currentUserId);
+
+    setRatingBusy("");
+
+    if (error) {
+      console.error("Delete rating error:", error.message);
+      return;
+    }
+
+    setRecentRatings((prev) => prev.filter((r) => r.id !== ratingId));
+  }
+
   async function handleAlbumSearch(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setAlbumMessage("");
@@ -486,7 +629,7 @@ export default function ProfilePage() {
         image_url: selectedAlbum.image_url,
         position,
       })
-      .select("id, album_name, artist_name, image_url, position")
+      .select("id, spotify_album_id, album_name, artist_name, image_url, position")
       .single();
 
     setAlbumSubmitting(false);
@@ -583,7 +726,7 @@ export default function ProfilePage() {
         image_url: selectedTrack.image_url,
         position,
       })
-      .select("id, track_name, artist_name, album_name, image_url, position")
+      .select("id, spotify_track_id, track_name, artist_name, album_name, image_url, position")
       .single();
 
     setTrackSubmitting(false);
@@ -756,7 +899,7 @@ export default function ProfilePage() {
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-black text-white flex items-center justify-center">
+      <main className="min-h-screen text-white flex items-center justify-center">
         <p className="text-zinc-400 text-lg">Loading profile...</p>
       </main>
     );
@@ -764,7 +907,7 @@ export default function ProfilePage() {
 
   if (notFound || !profile) {
     return (
-      <main className="min-h-screen bg-black text-white flex items-center justify-center px-6">
+      <main className="min-h-screen text-white flex items-center justify-center px-6">
         <div className="rounded-2xl bg-zinc-900 p-8 text-center shadow-lg">
           <h1 className="text-3xl font-bold">Profile not found</h1>
           <p className="mt-3 text-zinc-400">
@@ -776,21 +919,83 @@ export default function ProfilePage() {
   }
 
   return (
-    <main className="min-h-screen bg-black px-6 py-12 text-white">
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-8">
+    <main className="min-h-screen px-6 py-8 text-white">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <div className="rounded-2xl bg-zinc-900 p-8 shadow-lg">
           <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-center gap-5">
-              <div className="flex h-20 w-20 items-center justify-center rounded-full bg-zinc-800 text-3xl font-bold text-green-400">
-                {profile.display_name?.[0]?.toUpperCase() ||
-                  profile.username?.[0]?.toUpperCase() ||
-                  "U"}
+              <div className="relative group">
+                {profile.avatar_url ? (
+                  <img
+                    src={profile.avatar_url}
+                    alt={profile.username}
+                    className="h-20 w-20 rounded-full object-cover"
+                  />
+                ) : (
+                  <div className="flex h-20 w-20 items-center justify-center rounded-full bg-zinc-800 text-3xl font-bold text-green-400">
+                    {profile.display_name?.[0]?.toUpperCase() ||
+                      profile.username?.[0]?.toUpperCase() ||
+                      "U"}
+                  </div>
+                )}
+                {isOwnProfile && (
+                  <label className="absolute inset-0 flex cursor-pointer items-center justify-center rounded-full bg-black/60 opacity-0 transition group-hover:opacity-100">
+                    <span className="text-xs font-semibold text-white">Edit</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      disabled={avatarUploading}
+                      onChange={handleAvatarUpload}
+                    />
+                  </label>
+                )}
               </div>
 
               <div>
-                <h1 className="text-3xl font-bold">
-                  {profile.display_name || profile.username}
-                </h1>
+                {isEditingDisplayName ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={displayNameDraft}
+                      onChange={(e) => setDisplayNameDraft(e.target.value)}
+                      className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-2xl font-bold text-white outline-none focus:ring-2 focus:ring-green-500"
+                      placeholder="Display name"
+                      autoFocus
+                    />
+                    <button
+                      onClick={handleSaveDisplayName}
+                      disabled={displayNameSaving}
+                      className="rounded-lg bg-green-500 px-3 py-1.5 text-sm font-semibold text-black hover:bg-green-600 disabled:opacity-60"
+                    >
+                      {displayNameSaving ? "..." : "Save"}
+                    </button>
+                    <button
+                      onClick={() => setIsEditingDisplayName(false)}
+                      className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <h1 className="text-3xl font-bold">
+                      {profile.display_name || profile.username}
+                    </h1>
+                    {isOwnProfile && (
+                      <button
+                        onClick={() => {
+                          setDisplayNameDraft(profile.display_name || "");
+                          setIsEditingDisplayName(true);
+                        }}
+                        className="text-zinc-400 hover:text-zinc-200"
+                        title="Edit display name"
+                      >
+                        ✎
+                      </button>
+                    )}
+                  </div>
+                )}
                 <p className="text-zinc-400">@{profile.username}</p>
 
                 <div className="mt-3 flex gap-4 text-sm text-zinc-400">
@@ -859,7 +1064,7 @@ export default function ProfilePage() {
                   }}
                   className="rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800"
                 >
-                  Edit ✏️
+                  ✎ Edit
                 </button>
               )}
             </div>
@@ -908,82 +1113,180 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        <section className="rounded-2xl bg-zinc-900 p-8 shadow-lg">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-2xl font-bold">Recent Ratings</h2>
+        <div className="grid gap-6 lg:grid-cols-3">
+          <section className="rounded-2xl bg-zinc-900 p-5 shadow-lg">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-lg font-bold">Recent Ratings</h2>
 
-            <div className="flex gap-3">
-              {isOwnProfile && (
+              <div className="flex gap-2">
+                {isOwnProfile && (
+                  <Link
+                    href="/rate"
+                    className="rounded-lg border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
+                  >
+                    Rate
+                  </Link>
+                )}
                 <Link
-                  href="/rate"
-                  className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-800"
+                  href={`/profile/${profile.username}/ratings`}
+                  className="rounded-lg border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
                 >
-                  Rate a Song
+                  View All
                 </Link>
-              )}
-              <Link
-                href={`/profile/${profile.username}/ratings`}
-                className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-800"
-              >
-                View All Ratings
-              </Link>
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            {recentRatings.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-zinc-700 p-6 text-center text-zinc-400">
-                No song ratings yet.
               </div>
-            ) : (
-              recentRatings.map((rating) => (
-                <div key={rating.id} className="rounded-xl bg-zinc-800/60 p-4">
-                  <div className="flex items-center gap-4">
-                    {rating.image_url ? (
-                      <img
-                        src={rating.image_url}
-                        alt={rating.track_name}
-                        className="h-16 w-16 rounded-lg object-cover"
-                      />
-                    ) : (
-                      <div className="h-16 w-16 rounded-lg bg-zinc-700" />
-                    )}
+            </div>
 
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-semibold text-white">
-                        {rating.track_name}
-                      </p>
-                      <p className="truncate text-sm text-zinc-400">
-                        {rating.artist_name}
-                      </p>
-                      {rating.album_name && (
-                        <p className="truncate text-xs text-zinc-500">
-                          {rating.album_name}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="text-right">
-                      <p className="text-xl font-semibold text-green-400">
-                        {formatNotes(rating.rating)}
-                      </p>
-                      <p className="text-sm text-zinc-400">{rating.rating}/5</p>
-                    </div>
-                  </div>
-
-                  {rating.review && (
-                    <p className="mt-3 text-sm text-zinc-300">{rating.review}</p>
-                  )}
+            <div className="space-y-2">
+              {recentRatings.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-zinc-700 p-4 text-center text-sm text-zinc-400">
+                  No song ratings yet.
                 </div>
-              ))
-            )}
-          </div>
-        </section>
+              ) : (
+                recentRatings.map((rating) => (
+                  <div key={rating.id} className="rounded-lg bg-zinc-800/60 p-3 min-h-[7rem]">
+                    {editingRatingId === rating.id ? (
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-3">
+                          {rating.image_url ? (
+                            <img
+                              src={rating.image_url}
+                              alt={rating.track_name}
+                              className="h-12 w-12 rounded object-cover"
+                            />
+                          ) : (
+                            <div className="h-12 w-12 rounded bg-zinc-700" />
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-semibold text-white">
+                              {rating.track_name}
+                            </p>
+                            <p className="truncate text-xs text-zinc-400">
+                              {rating.artist_name}
+                            </p>
+                          </div>
+                        </div>
 
-        <div className="grid gap-8 lg:grid-cols-2">
-          <section className="rounded-2xl bg-zinc-900 p-8 shadow-lg">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-2xl font-bold">Favorite Tracks</h2>
+                        <select
+                          value={editRatingValue}
+                          onChange={(e) => setEditRatingValue(e.target.value)}
+                          className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-white outline-none"
+                        >
+                          {[0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5].map((v) => (
+                            <option key={v} value={v}>{v} — {formatNotesText(v)}</option>
+                          ))}
+                        </select>
+
+                        <textarea
+                          value={editReviewValue}
+                          onChange={(e) => setEditReviewValue(e.target.value)}
+                          rows={2}
+                          placeholder="Review (optional)"
+                          className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-white outline-none"
+                        />
+
+                        <div className="flex gap-1">
+                          <button
+                            onClick={() => handleSaveRating(rating.id)}
+                            disabled={ratingBusy !== ""}
+                            className="rounded bg-green-500 px-2 py-1 text-xs font-semibold text-black hover:bg-green-600 disabled:opacity-50"
+                          >
+                            Save
+                          </button>
+                          <button
+                            onClick={cancelEditRating}
+                            className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-3">
+                          {rating.image_url ? (
+                            <img
+                              src={rating.image_url}
+                              alt={rating.track_name}
+                              className="h-12 w-12 rounded object-cover"
+                            />
+                          ) : (
+                            <div className="h-12 w-12 rounded bg-zinc-700" />
+                          )}
+
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-semibold text-white">
+                              {rating.track_name}
+                            </p>
+                            <p className="truncate text-xs text-zinc-400">
+                              {rating.artist_name}
+                            </p>
+                          </div>
+
+                          <div className="shrink-0 text-right">
+                            <p className="text-sm font-semibold text-green-400">
+                              <NoteRating rating={rating.rating} />
+                            </p>
+                            <p className="text-xs text-zinc-400">{rating.rating}/5</p>
+                          </div>
+                        </div>
+
+                        {rating.review && (
+                          <p className="mt-1.5 truncate text-xs italic text-zinc-400">
+                            &ldquo;{rating.review}&rdquo;
+                          </p>
+                        )}
+
+                        {isOwnProfile && (
+                          <div className="mt-2 flex flex-wrap items-center gap-1">
+                            <button
+                              onClick={() => startEditRating(rating)}
+                              disabled={ratingBusy !== ""}
+                              className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+                            >
+                              ✎
+                            </button>
+                            <button
+                              onClick={() => handleDeleteRating(rating.id)}
+                              disabled={ratingBusy !== ""}
+                              className="rounded border border-red-700 px-2 py-1 text-xs text-red-300 hover:bg-red-950/40 disabled:opacity-50"
+                            >
+                              ✕
+                            </button>
+                            {rating.spotify_track_id && (
+                              <a
+                                href={`https://open.spotify.com/track/${rating.spotify_track_id}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="ml-auto text-xs text-green-400 hover:underline"
+                              >
+                                Listen on Spotify
+                              </a>
+                            )}
+                          </div>
+                        )}
+                        {!isOwnProfile && rating.spotify_track_id && (
+                          <div className="mt-2 flex justify-end">
+                            <a
+                              href={`https://open.spotify.com/track/${rating.spotify_track_id}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-xs text-green-400 hover:underline"
+                            >
+                              Listen on Spotify
+                            </a>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
+
+          <section className="rounded-2xl bg-zinc-900 p-5 shadow-lg">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-lg font-bold">Favorite Tracks</h2>
 
               {isOwnProfile && (
                 <button
@@ -994,7 +1297,7 @@ export default function ProfilePage() {
                     setSelectedTrack(null);
                     setTrackSearch("");
                   }}
-                  className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-800"
+                  className="rounded-lg border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
                 >
                   {showTrackForm ? "Close" : "Add Track"}
                 </button>
@@ -1125,67 +1428,86 @@ export default function ProfilePage() {
               </div>
             )}
 
-            <div className="space-y-3">
+            <div className="space-y-2">
               {favoriteTracks.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-zinc-700 p-6 text-center text-zinc-400">
+                <div className="rounded-xl border border-dashed border-zinc-700 p-4 text-center text-sm text-zinc-400">
                   No favorite tracks yet.
                 </div>
               ) : (
                 favoriteTracks.map((track) => (
-                  <div key={track.id} className="rounded-xl bg-zinc-800/60 p-3">
-                    <div className="flex items-center gap-4">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-green-500 font-bold text-black">
-                        {track.position}
-                      </div>
-
+                  <div key={track.id} className="rounded-lg bg-zinc-800/60 p-3 min-h-[7rem]">
+                    <div className="flex items-center gap-3">
                       {track.image_url ? (
                         <img
                           src={track.image_url}
                           alt={track.track_name}
-                          className="h-14 w-14 rounded-lg object-cover"
+                          className="h-12 w-12 rounded object-cover"
                         />
                       ) : (
-                        <div className="h-14 w-14 rounded-lg bg-zinc-700" />
+                        <div className="h-12 w-12 rounded bg-zinc-700" />
                       )}
 
                       <div className="min-w-0 flex-1">
-                        <p className="truncate font-semibold text-white">
+                        <p className="truncate text-sm font-semibold text-white">
                           {track.track_name}
                         </p>
-                        <p className="truncate text-sm text-zinc-400">
+                        <p className="truncate text-xs text-zinc-400">
                           {track.artist_name}
                         </p>
-                        {track.album_name && (
-                          <p className="truncate text-xs text-zinc-500">
-                            {track.album_name}
-                          </p>
-                        )}
+                      </div>
+
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-green-500 text-sm font-bold text-black">
+                        {track.position}
                       </div>
                     </div>
 
+                    <p className="mt-1.5 text-xs text-transparent">&nbsp;</p>
+
                     {isOwnProfile && (
-                      <div className="mt-3 flex flex-wrap gap-2">
+                      <div className="mt-2 flex flex-wrap items-center gap-1">
                         <button
                           onClick={() => moveTrackUp(track)}
                           disabled={track.position === 1 || busyAction !== ""}
-                          className="rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+                          className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
                         >
-                          ↑ Move Up
+                          ↑
                         </button>
                         <button
                           onClick={() => moveTrackDown(track)}
                           disabled={track.position === 5 || busyAction !== ""}
-                          className="rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+                          className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
                         >
-                          ↓ Move Down
+                          ↓
                         </button>
                         <button
                           onClick={() => handleDeleteFavoriteTrack(track.id)}
                           disabled={busyAction !== ""}
-                          className="rounded-lg border border-red-700 px-3 py-2 text-xs text-red-300 hover:bg-red-950/40 disabled:opacity-50"
+                          className="rounded border border-red-700 px-2 py-1 text-xs text-red-300 hover:bg-red-950/40 disabled:opacity-50"
                         >
-                          Delete
+                          ✕
                         </button>
+                        {track.spotify_track_id && (
+                          <a
+                            href={`https://open.spotify.com/track/${track.spotify_track_id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="ml-auto text-xs text-green-400 hover:underline"
+                          >
+                            Listen on Spotify
+                          </a>
+                        )}
+                      </div>
+                    )}
+                    {!isOwnProfile && track.spotify_track_id && (
+                      <div className="mt-2 flex justify-end">
+                        <a
+                          href={`https://open.spotify.com/track/${track.spotify_track_id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-green-400 hover:underline"
+                        >
+                          Listen on Spotify
+                        </a>
                       </div>
                     )}
                   </div>
@@ -1194,9 +1516,9 @@ export default function ProfilePage() {
             </div>
           </section>
 
-          <section className="rounded-2xl bg-zinc-900 p-8 shadow-lg">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-2xl font-bold">Favorite Albums</h2>
+          <section className="rounded-2xl bg-zinc-900 p-5 shadow-lg">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-lg font-bold">Favorite Albums</h2>
 
               {isOwnProfile && (
                 <button
@@ -1207,7 +1529,7 @@ export default function ProfilePage() {
                     setSelectedAlbum(null);
                     setAlbumSearch("");
                   }}
-                  className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-800"
+                  className="rounded-lg border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
                 >
                   {showAlbumForm ? "Close" : "Add Album"}
                 </button>
@@ -1328,53 +1650,86 @@ export default function ProfilePage() {
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+            <div className="space-y-2">
               {favoriteAlbums.length === 0 ? (
-                <div className="col-span-full rounded-xl border border-dashed border-zinc-700 p-6 text-center text-zinc-400">
+                <div className="rounded-xl border border-dashed border-zinc-700 p-4 text-center text-sm text-zinc-400">
                   No favorite albums yet.
                 </div>
               ) : (
                 favoriteAlbums.map((album) => (
-                  <div key={album.id} className="rounded-xl bg-zinc-800/60 p-3">
-                    {album.image_url ? (
-                      <img
-                        src={album.image_url}
-                        alt={album.album_name}
-                        className="mb-3 aspect-square w-full rounded-lg object-cover"
-                      />
-                    ) : (
-                      <div className="mb-3 aspect-square w-full rounded-lg bg-zinc-700" />
-                    )}
+                  <div key={album.id} className="rounded-lg bg-zinc-800/60 p-3 min-h-[7rem]">
+                    <div className="flex items-center gap-3">
+                      {album.image_url ? (
+                        <img
+                          src={album.image_url}
+                          alt={album.album_name}
+                          className="h-12 w-12 rounded object-cover"
+                        />
+                      ) : (
+                        <div className="h-12 w-12 rounded bg-zinc-700" />
+                      )}
 
-                    <div className="mb-1 text-sm font-bold text-green-400">
-                      #{album.position}
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold text-white">
+                          {album.album_name}
+                        </p>
+                        <p className="truncate text-xs text-zinc-400">
+                          {album.artist_name}
+                        </p>
+                      </div>
+
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-green-500 text-sm font-bold text-black">
+                        {album.position}
+                      </div>
                     </div>
-                    <p className="font-semibold text-white">{album.album_name}</p>
-                    <p className="text-sm text-zinc-400">{album.artist_name}</p>
+
+                    <p className="mt-1.5 text-xs text-transparent">&nbsp;</p>
 
                     {isOwnProfile && (
-                      <div className="mt-3 flex flex-wrap gap-2">
+                      <div className="mt-2 flex flex-wrap items-center gap-1">
                         <button
                           onClick={() => moveAlbumUp(album)}
                           disabled={album.position === 1 || busyAction !== ""}
-                          className="rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+                          className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
                         >
-                          ↑ Up
+                          ↑
                         </button>
                         <button
                           onClick={() => moveAlbumDown(album)}
                           disabled={album.position === 5 || busyAction !== ""}
-                          className="rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+                          className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
                         >
-                          ↓ Down
+                          ↓
                         </button>
                         <button
                           onClick={() => handleDeleteFavoriteAlbum(album.id)}
                           disabled={busyAction !== ""}
-                          className="rounded-lg border border-red-700 px-3 py-2 text-xs text-red-300 hover:bg-red-950/40 disabled:opacity-50"
+                          className="rounded border border-red-700 px-2 py-1 text-xs text-red-300 hover:bg-red-950/40 disabled:opacity-50"
                         >
-                          Delete
+                          ✕
                         </button>
+                        {album.spotify_album_id && (
+                          <a
+                            href={`https://open.spotify.com/album/${album.spotify_album_id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="ml-auto text-xs text-green-400 hover:underline"
+                          >
+                            Listen on Spotify
+                          </a>
+                        )}
+                      </div>
+                    )}
+                    {!isOwnProfile && album.spotify_album_id && (
+                      <div className="mt-2 flex justify-end">
+                        <a
+                          href={`https://open.spotify.com/album/${album.spotify_album_id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-green-400 hover:underline"
+                        >
+                          Listen on Spotify
+                        </a>
                       </div>
                     )}
                   </div>

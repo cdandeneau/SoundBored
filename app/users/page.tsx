@@ -226,14 +226,14 @@ export default function UsersPage() {
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-black text-white flex items-center justify-center">
+      <main className="min-h-screen text-white flex items-center justify-center">
         <p className="text-lg text-zinc-400">Loading users...</p>
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-black px-6 py-12 text-white">
+    <main className="min-h-screen px-6 py-12 text-white">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-8">
         <div className="rounded-2xl bg-zinc-900 p-8 shadow-lg">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -287,11 +287,19 @@ export default function UsersPage() {
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">
                     <div className="flex items-center gap-4">
-                      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-zinc-800 text-xl font-bold text-green-400">
-                        {profile.display_name?.[0]?.toUpperCase() ||
-                          profile.username[0]?.toUpperCase() ||
-                          "U"}
-                      </div>
+                      {profile.avatar_url ? (
+                        <img
+                          src={profile.avatar_url}
+                          alt={profile.username}
+                          className="h-14 w-14 rounded-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-zinc-800 text-xl font-bold text-green-400">
+                          {profile.display_name?.[0]?.toUpperCase() ||
+                            profile.username[0]?.toUpperCase() ||
+                            "U"}
+                        </div>
+                      )}
 
                       <div className="min-w-0">
                         <Link
