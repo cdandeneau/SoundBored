@@ -3,9 +3,20 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { DndContext, closestCenter, DragEndEvent } from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  rectSortingStrategy,
+} from "@dnd-kit/sortable";
 import { supabase } from "../../../utils/supabase/supabaseClient";
 import TopNav from "../../../components/TopNav";
 import NoteRating from "../../components/NoteRating";
+import SortableSection from "../../components/profile/SortableSection";
+import VinylPlayer from "../../components/profile/VinylPlayer";
+import TextSection from "../../components/profile/TextSection";
+import CustomPlaylistSection from "../../components/profile/CustomPlaylistSection";
+import AddSectionModal from "../../components/profile/AddSectionModal";
 
 function formatNotesText(rating: number) {
   const fullNotes = Math.floor(rating);
@@ -13,12 +24,28 @@ function formatNotesText(rating: number) {
   return "♪".repeat(fullNotes) + (half ? "½" : "");
 }
 
+type LayoutSection = {
+  id: string;
+  type: string;
+  width: "full" | "half" | "third";
+  title: string;
+  position: number;
+  data?: Record<string, unknown>;
+};
+
+const DEFAULT_LAYOUT: LayoutSection[] = [
+  { id: "recent-ratings", type: "recent-ratings", width: "third", title: "Recent Ratings", position: 0 },
+  { id: "favorite-tracks", type: "favorite-tracks", width: "third", title: "Favorite Tracks", position: 1 },
+  { id: "favorite-albums", type: "favorite-albums", width: "third", title: "Favorite Albums", position: 2 },
+];
+
 type Profile = {
   id: string;
   username: string;
   display_name: string | null;
   bio: string | null;
   avatar_url: string | null;
+  profile_layout: LayoutSection[] | null;
 };
 
 type FavoriteTrack = {
@@ -130,6 +157,10 @@ export default function ProfilePage() {
   const [editReviewValue, setEditReviewValue] = useState("");
   const [ratingBusy, setRatingBusy] = useState("");
 
+  const [layout, setLayout] = useState<LayoutSection[]>(DEFAULT_LAYOUT);
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [showAddSection, setShowAddSection] = useState(false);
+
   function reorderAlbumsLocal(albumAId: string, albumBId: string) {
     setFavoriteAlbums((prev) => {
       const updated = [...prev];
@@ -200,7 +231,7 @@ export default function ProfilePage() {
 
     const { data: profileData, error: profileError } = await supabase
       .from("profiles")
-      .select("id, username, display_name, bio, avatar_url")
+      .select("id, username, display_name, bio, avatar_url, profile_layout")
       .eq("username", username.toLowerCase())
       .single();
 
@@ -212,6 +243,7 @@ export default function ProfilePage() {
 
     setProfile(profileData);
     setBioDraft(profileData.bio || "");
+    setLayout(profileData.profile_layout || DEFAULT_LAYOUT);
 
     const ownProfile = !!user?.id && user.id === profileData.id;
     setIsOwnProfile(ownProfile);
@@ -897,6 +929,373 @@ export default function ProfilePage() {
     await swapTrackPositions(track, other);
   }
 
+  /* ───── Layout handlers ───── */
+
+  async function saveLayout(newLayout: LayoutSection[]) {
+    setLayout(newLayout);
+    if (!currentUserId) return;
+    await supabase
+      .from("profiles")
+      .update({ profile_layout: newLayout })
+      .eq("id", currentUserId);
+  }
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = layout.findIndex((s) => s.id === active.id);
+    const newIndex = layout.findIndex((s) => s.id === over.id);
+    const reordered = arrayMove(layout, oldIndex, newIndex).map((s, i) => ({
+      ...s,
+      position: i,
+    }));
+    saveLayout(reordered);
+  }
+
+  function handleResizeSection(
+    sectionId: string,
+    width: "full" | "half" | "third"
+  ) {
+    saveLayout(layout.map((s) => (s.id === sectionId ? { ...s, width } : s)));
+  }
+
+  function handleRemoveSection(sectionId: string) {
+    saveLayout(
+      layout
+        .filter((s) => s.id !== sectionId)
+        .map((s, i) => ({ ...s, position: i }))
+    );
+  }
+
+  function handleAddSection(type: string, title: string) {
+    const id = `${type}-${Date.now()}`;
+    const data =
+      type === "text"
+        ? { content: "" }
+        : type === "vinyl"
+          ? {}
+          : type === "custom-playlist"
+            ? { tracks: [] }
+            : undefined;
+    saveLayout([
+      ...layout,
+      { id, type, width: "third", title, position: layout.length, data },
+    ]);
+  }
+
+  function updateSectionData(sectionId: string, data: Record<string, unknown>) {
+    saveLayout(
+      layout.map((s) => (s.id === sectionId ? { ...s, data } : s))
+    );
+  }
+
+  function updateSectionTitle(sectionId: string, title: string) {
+    saveLayout(
+      layout.map((s) => (s.id === sectionId ? { ...s, title } : s))
+    );
+  }
+
+  /* ───── Section renderers ───── */
+
+  function renderSectionContent(section: LayoutSection) {
+    switch (section.type) {
+      case "recent-ratings":
+        return renderRecentRatings();
+      case "favorite-tracks":
+        return renderFavoriteTracks();
+      case "favorite-albums":
+        return renderFavoriteAlbums();
+      case "vinyl":
+        return (
+          <VinylPlayer
+            title={section.title}
+            track={(section.data?.track as { spotify_track_id: string; track_name: string; artist_name: string; image_url: string | null }) || null}
+            isOwnProfile={isOwnProfile}
+            onSelectTrack={(track) => updateSectionData(section.id, { track })}
+          />
+        );
+      case "text":
+        return (
+          <TextSection
+            title={section.title}
+            content={(section.data?.content as string) || ""}
+            isOwnProfile={isOwnProfile}
+            onSave={(title, content) => {
+              updateSectionTitle(section.id, title);
+              updateSectionData(section.id, { content });
+            }}
+          />
+        );
+      case "custom-playlist":
+        return (
+          <CustomPlaylistSection
+            title={section.title}
+            tracks={(section.data?.tracks as { spotify_track_id: string; track_name: string; artist_name: string; image_url: string | null }[]) || []}
+            isOwnProfile={isOwnProfile}
+            onUpdateTitle={(title) => updateSectionTitle(section.id, title)}
+            onAddTrack={(track) => {
+              const tracks = [...((section.data?.tracks as unknown[]) || []), track];
+              updateSectionData(section.id, { ...section.data, tracks });
+            }}
+            onRemoveTrack={(spotifyTrackId) => {
+              const tracks = ((section.data?.tracks as { spotify_track_id: string }[]) || []).filter(
+                (t) => t.spotify_track_id !== spotifyTrackId
+              );
+              updateSectionData(section.id, { ...section.data, tracks });
+            }}
+          />
+        );
+      default:
+        return null;
+    }
+  }
+
+  function renderRecentRatings() {
+    return (
+      <section className="rounded-2xl bg-zinc-900 p-5 shadow-lg">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-lg font-bold">Recent Ratings</h2>
+          <div className="flex gap-2">
+            {isOwnProfile && (
+              <Link href="/rate" className="rounded-lg border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800">
+                Rate
+              </Link>
+            )}
+            <Link href={`/profile/${profile!.username}/ratings`} className="rounded-lg border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800">
+              View All
+            </Link>
+          </div>
+        </div>
+        <div className="space-y-2">
+          {recentRatings.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-zinc-700 p-4 text-center text-sm text-zinc-400">No song ratings yet.</div>
+          ) : (
+            recentRatings.map((rating) => (
+              <div key={rating.id} className="rounded-lg bg-zinc-800/60 p-3 min-h-[7rem]">
+                {editingRatingId === rating.id ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-3">
+                      {rating.image_url ? (<img src={rating.image_url} alt={rating.track_name} className="h-12 w-12 rounded object-cover" />) : (<div className="h-12 w-12 rounded bg-zinc-700" />)}
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold text-white">{rating.track_name}</p>
+                        <p className="truncate text-xs text-zinc-400">{rating.artist_name}</p>
+                      </div>
+                    </div>
+                    <select value={editRatingValue} onChange={(e) => setEditRatingValue(e.target.value)} className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-white outline-none">
+                      {[0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5].map((v) => (<option key={v} value={v}>{v} — {formatNotesText(v)}</option>))}
+                    </select>
+                    <textarea value={editReviewValue} onChange={(e) => setEditReviewValue(e.target.value)} rows={2} placeholder="Review (optional)" className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-white outline-none" />
+                    <div className="flex gap-1">
+                      <button onClick={() => handleSaveRating(rating.id)} disabled={ratingBusy !== ""} className="rounded bg-green-500 px-2 py-1 text-xs font-semibold text-black hover:bg-green-600 disabled:opacity-50">Save</button>
+                      <button onClick={cancelEditRating} className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800">Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-3">
+                      {rating.image_url ? (<img src={rating.image_url} alt={rating.track_name} className="h-12 w-12 rounded object-cover" />) : (<div className="h-12 w-12 rounded bg-zinc-700" />)}
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold text-white">{rating.track_name}</p>
+                        <p className="truncate text-xs text-zinc-400">{rating.artist_name}</p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p className="text-sm font-semibold text-green-400"><NoteRating rating={rating.rating} /></p>
+                        <p className="text-xs text-zinc-400">{rating.rating}/5</p>
+                      </div>
+                    </div>
+                    {rating.review && (<p className="mt-1.5 truncate text-xs italic text-zinc-400">&ldquo;{rating.review}&rdquo;</p>)}
+                    {isOwnProfile && (
+                      <div className="mt-2 flex flex-wrap items-center gap-1">
+                        <button onClick={() => startEditRating(rating)} disabled={ratingBusy !== ""} className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50">✎</button>
+                        <button onClick={() => handleDeleteRating(rating.id)} disabled={ratingBusy !== ""} className="rounded border border-red-700 px-2 py-1 text-xs text-red-300 hover:bg-red-950/40 disabled:opacity-50">✕</button>
+                        {rating.spotify_track_id && (<a href={`https://open.spotify.com/track/${rating.spotify_track_id}`} target="_blank" rel="noopener noreferrer" className="ml-auto text-xs text-green-400 hover:underline">Listen on Spotify</a>)}
+                      </div>
+                    )}
+                    {!isOwnProfile && rating.spotify_track_id && (
+                      <div className="mt-2 flex justify-end">
+                        <a href={`https://open.spotify.com/track/${rating.spotify_track_id}`} target="_blank" rel="noopener noreferrer" className="text-xs text-green-400 hover:underline">Listen on Spotify</a>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      </section>
+    );
+  }
+
+  function renderFavoriteTracks() {
+    return (
+      <section className="rounded-2xl bg-zinc-900 p-5 shadow-lg">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-lg font-bold">Favorite Tracks</h2>
+          {isOwnProfile && (
+            <button onClick={() => { setShowTrackForm((prev) => !prev); setTrackMessage(""); setTrackResults([]); setSelectedTrack(null); setTrackSearch(""); }} className="rounded-lg border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800">
+              {showTrackForm ? "Close" : "Add Track"}
+            </button>
+          )}
+        </div>
+        {isOwnProfile && showTrackForm && (
+          <div className="mb-6 space-y-4">
+            <form className="space-y-3" onSubmit={handleTrackSearch}>
+              <input type="text" placeholder="Search for a track" value={trackSearch} onChange={(e) => setTrackSearch(e.target.value)} className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-3 text-white outline-none focus:ring-2 focus:ring-green-500" />
+              <button type="submit" disabled={trackSearchLoading} className="w-full rounded-lg border border-zinc-700 px-4 py-3 font-semibold text-zinc-200 hover:bg-zinc-800 disabled:opacity-60">{trackSearchLoading ? "Searching..." : "Search Tracks"}</button>
+            </form>
+            {trackResults.length > 0 && (
+              <div className="max-h-72 space-y-3 overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-950/50 p-3">
+                {trackResults.map((track) => (
+                  <button key={track.spotify_track_id} type="button" onClick={() => setSelectedTrack(track)} className={`flex w-full items-center gap-3 rounded-lg p-3 text-left transition ${selectedTrack?.spotify_track_id === track.spotify_track_id ? "bg-green-500/20 ring-1 ring-green-500" : "bg-zinc-800/60 hover:bg-zinc-800"}`}>
+                    {track.image_url ? (<img src={track.image_url} alt={track.track_name} className="h-16 w-16 rounded-lg object-cover" />) : (<div className="h-16 w-16 rounded-lg bg-zinc-700" />)}
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold text-white">{track.track_name}</p>
+                      <p className="truncate text-sm text-zinc-400">{track.artist_name}</p>
+                      {track.album_name && (<p className="truncate text-xs text-zinc-500">{track.album_name}</p>)}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+            <form onSubmit={handleAddFavoriteTrack} className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-950/50 p-4">
+              {selectedTrack ? (
+                <div className="flex items-center gap-3 rounded-lg bg-zinc-800/70 p-3">
+                  {selectedTrack.image_url ? (<img src={selectedTrack.image_url} alt={selectedTrack.track_name} className="h-16 w-16 rounded-lg object-cover" />) : (<div className="h-16 w-16 rounded-lg bg-zinc-700" />)}
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold text-white">{selectedTrack.track_name}</p>
+                    <p className="truncate text-sm text-zinc-400">{selectedTrack.artist_name}</p>
+                    {selectedTrack.album_name && (<p className="truncate text-xs text-zinc-500">{selectedTrack.album_name}</p>)}
+                  </div>
+                </div>
+              ) : (<p className="text-sm text-zinc-400">Select a track above first.</p>)}
+              <select value={trackPosition} onChange={(e) => setTrackPosition(e.target.value)} className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-3 text-white outline-none focus:ring-2 focus:ring-green-500">
+                <option value="1">Position #1</option><option value="2">Position #2</option><option value="3">Position #3</option><option value="4">Position #4</option><option value="5">Position #5</option>
+              </select>
+              <button type="submit" disabled={trackSubmitting} className="w-full rounded-lg bg-green-500 px-4 py-3 font-semibold text-black transition hover:bg-green-600 disabled:opacity-60">{trackSubmitting ? "Saving..." : "Save Favorite Track"}</button>
+              {trackMessage && (<p className="text-sm text-zinc-300">{trackMessage}</p>)}
+            </form>
+          </div>
+        )}
+        <div className="space-y-2">
+          {favoriteTracks.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-zinc-700 p-4 text-center text-sm text-zinc-400">No favorite tracks yet.</div>
+          ) : (
+            favoriteTracks.map((track) => (
+              <div key={track.id} className="rounded-lg bg-zinc-800/60 p-3 min-h-[7rem]">
+                <div className="flex items-center gap-3">
+                  {track.image_url ? (<img src={track.image_url} alt={track.track_name} className="h-12 w-12 rounded object-cover" />) : (<div className="h-12 w-12 rounded bg-zinc-700" />)}
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-white">{track.track_name}</p>
+                    <p className="truncate text-xs text-zinc-400">{track.artist_name}</p>
+                  </div>
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-green-500 text-sm font-bold text-black">{track.position}</div>
+                </div>
+                <p className="mt-1.5 text-xs text-transparent">&nbsp;</p>
+                {isOwnProfile && (
+                  <div className="mt-2 flex flex-wrap items-center gap-1">
+                    <button onClick={() => moveTrackUp(track)} disabled={track.position === 1 || busyAction !== ""} className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50">↑</button>
+                    <button onClick={() => moveTrackDown(track)} disabled={track.position === 5 || busyAction !== ""} className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50">↓</button>
+                    <button onClick={() => handleDeleteFavoriteTrack(track.id)} disabled={busyAction !== ""} className="rounded border border-red-700 px-2 py-1 text-xs text-red-300 hover:bg-red-950/40 disabled:opacity-50">✕</button>
+                    {track.spotify_track_id && (<a href={`https://open.spotify.com/track/${track.spotify_track_id}`} target="_blank" rel="noopener noreferrer" className="ml-auto text-xs text-green-400 hover:underline">Listen on Spotify</a>)}
+                  </div>
+                )}
+                {!isOwnProfile && track.spotify_track_id && (
+                  <div className="mt-2 flex justify-end">
+                    <a href={`https://open.spotify.com/track/${track.spotify_track_id}`} target="_blank" rel="noopener noreferrer" className="text-xs text-green-400 hover:underline">Listen on Spotify</a>
+                  </div>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      </section>
+    );
+  }
+
+  function renderFavoriteAlbums() {
+    return (
+      <section className="rounded-2xl bg-zinc-900 p-5 shadow-lg">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-lg font-bold">Favorite Albums</h2>
+          {isOwnProfile && (
+            <button onClick={() => { setShowAlbumForm((prev) => !prev); setAlbumMessage(""); setAlbumResults([]); setSelectedAlbum(null); setAlbumSearch(""); }} className="rounded-lg border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800">
+              {showAlbumForm ? "Close" : "Add Album"}
+            </button>
+          )}
+        </div>
+        {isOwnProfile && showAlbumForm && (
+          <div className="mb-6 space-y-4">
+            <form className="space-y-3" onSubmit={handleAlbumSearch}>
+              <input type="text" placeholder="Search for an album" value={albumSearch} onChange={(e) => setAlbumSearch(e.target.value)} className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-3 text-white outline-none focus:ring-2 focus:ring-green-500" />
+              <button type="submit" disabled={albumSearchLoading} className="w-full rounded-lg border border-zinc-700 px-4 py-3 font-semibold text-zinc-200 hover:bg-zinc-800 disabled:opacity-60">{albumSearchLoading ? "Searching..." : "Search Albums"}</button>
+            </form>
+            {albumResults.length > 0 && (
+              <div className="max-h-72 space-y-3 overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-950/50 p-3">
+                {albumResults.map((album) => (
+                  <button key={album.spotify_album_id} type="button" onClick={() => setSelectedAlbum(album)} className={`flex w-full items-center gap-3 rounded-lg p-3 text-left transition ${selectedAlbum?.spotify_album_id === album.spotify_album_id ? "bg-green-500/20 ring-1 ring-green-500" : "bg-zinc-800/60 hover:bg-zinc-800"}`}>
+                    {album.image_url ? (<img src={album.image_url} alt={album.album_name} className="h-16 w-16 rounded-lg object-cover" />) : (<div className="h-16 w-16 rounded-lg bg-zinc-700" />)}
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold text-white">{album.album_name}</p>
+                      <p className="truncate text-sm text-zinc-400">{album.artist_name}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+            <form onSubmit={handleAddFavoriteAlbum} className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-950/50 p-4">
+              {selectedAlbum ? (
+                <div className="flex items-center gap-3 rounded-lg bg-zinc-800/70 p-3">
+                  {selectedAlbum.image_url ? (<img src={selectedAlbum.image_url} alt={selectedAlbum.album_name} className="h-16 w-16 rounded-lg object-cover" />) : (<div className="h-16 w-16 rounded-lg bg-zinc-700" />)}
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold text-white">{selectedAlbum.album_name}</p>
+                    <p className="truncate text-sm text-zinc-400">{selectedAlbum.artist_name}</p>
+                  </div>
+                </div>
+              ) : (<p className="text-sm text-zinc-400">Select an album above first.</p>)}
+              <select value={albumPosition} onChange={(e) => setAlbumPosition(e.target.value)} className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-3 text-white outline-none focus:ring-2 focus:ring-green-500">
+                <option value="1">Position #1</option><option value="2">Position #2</option><option value="3">Position #3</option><option value="4">Position #4</option><option value="5">Position #5</option>
+              </select>
+              <button type="submit" disabled={albumSubmitting} className="w-full rounded-lg bg-green-500 px-4 py-3 font-semibold text-black transition hover:bg-green-600 disabled:opacity-60">{albumSubmitting ? "Saving..." : "Save Favorite Album"}</button>
+              {albumMessage && (<p className="text-sm text-zinc-300">{albumMessage}</p>)}
+            </form>
+          </div>
+        )}
+        <div className="space-y-2">
+          {favoriteAlbums.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-zinc-700 p-4 text-center text-sm text-zinc-400">No favorite albums yet.</div>
+          ) : (
+            favoriteAlbums.map((album) => (
+              <div key={album.id} className="rounded-lg bg-zinc-800/60 p-3 min-h-[7rem]">
+                <div className="flex items-center gap-3">
+                  {album.image_url ? (<img src={album.image_url} alt={album.album_name} className="h-12 w-12 rounded object-cover" />) : (<div className="h-12 w-12 rounded bg-zinc-700" />)}
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-white">{album.album_name}</p>
+                    <p className="truncate text-xs text-zinc-400">{album.artist_name}</p>
+                  </div>
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-green-500 text-sm font-bold text-black">{album.position}</div>
+                </div>
+                <p className="mt-1.5 text-xs text-transparent">&nbsp;</p>
+                {isOwnProfile && (
+                  <div className="mt-2 flex flex-wrap items-center gap-1">
+                    <button onClick={() => moveAlbumUp(album)} disabled={album.position === 1 || busyAction !== ""} className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50">↑</button>
+                    <button onClick={() => moveAlbumDown(album)} disabled={album.position === 5 || busyAction !== ""} className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50">↓</button>
+                    <button onClick={() => handleDeleteFavoriteAlbum(album.id)} disabled={busyAction !== ""} className="rounded border border-red-700 px-2 py-1 text-xs text-red-300 hover:bg-red-950/40 disabled:opacity-50">✕</button>
+                    {album.spotify_album_id && (<a href={`https://open.spotify.com/album/${album.spotify_album_id}`} target="_blank" rel="noopener noreferrer" className="ml-auto text-xs text-green-400 hover:underline">Listen on Spotify</a>)}
+                  </div>
+                )}
+                {!isOwnProfile && album.spotify_album_id && (
+                  <div className="mt-2 flex justify-end">
+                    <a href={`https://open.spotify.com/album/${album.spotify_album_id}`} target="_blank" rel="noopener noreferrer" className="text-xs text-green-400 hover:underline">Listen on Spotify</a>
+                  </div>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      </section>
+    );
+  }
+
   if (loading) {
     return (
       <main className="min-h-screen text-white flex items-center justify-center">
@@ -1113,631 +1512,55 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        <div className="grid gap-6 lg:grid-cols-3">
-          <section className="rounded-2xl bg-zinc-900 p-5 shadow-lg">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-lg font-bold">Recent Ratings</h2>
-
-              <div className="flex gap-2">
-                {isOwnProfile && (
-                  <Link
-                    href="/rate"
-                    className="rounded-lg border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
-                  >
-                    Rate
-                  </Link>
-                )}
-                <Link
-                  href={`/profile/${profile.username}/ratings`}
-                  className="rounded-lg border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
-                >
-                  View All
-                </Link>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              {recentRatings.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-zinc-700 p-4 text-center text-sm text-zinc-400">
-                  No song ratings yet.
-                </div>
-              ) : (
-                recentRatings.map((rating) => (
-                  <div key={rating.id} className="rounded-lg bg-zinc-800/60 p-3 min-h-[7rem]">
-                    {editingRatingId === rating.id ? (
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-3">
-                          {rating.image_url ? (
-                            <img
-                              src={rating.image_url}
-                              alt={rating.track_name}
-                              className="h-12 w-12 rounded object-cover"
-                            />
-                          ) : (
-                            <div className="h-12 w-12 rounded bg-zinc-700" />
-                          )}
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-semibold text-white">
-                              {rating.track_name}
-                            </p>
-                            <p className="truncate text-xs text-zinc-400">
-                              {rating.artist_name}
-                            </p>
-                          </div>
-                        </div>
-
-                        <select
-                          value={editRatingValue}
-                          onChange={(e) => setEditRatingValue(e.target.value)}
-                          className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-white outline-none"
-                        >
-                          {[0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5].map((v) => (
-                            <option key={v} value={v}>{v} — {formatNotesText(v)}</option>
-                          ))}
-                        </select>
-
-                        <textarea
-                          value={editReviewValue}
-                          onChange={(e) => setEditReviewValue(e.target.value)}
-                          rows={2}
-                          placeholder="Review (optional)"
-                          className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-white outline-none"
-                        />
-
-                        <div className="flex gap-1">
-                          <button
-                            onClick={() => handleSaveRating(rating.id)}
-                            disabled={ratingBusy !== ""}
-                            className="rounded bg-green-500 px-2 py-1 text-xs font-semibold text-black hover:bg-green-600 disabled:opacity-50"
-                          >
-                            Save
-                          </button>
-                          <button
-                            onClick={cancelEditRating}
-                            className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="flex items-center gap-3">
-                          {rating.image_url ? (
-                            <img
-                              src={rating.image_url}
-                              alt={rating.track_name}
-                              className="h-12 w-12 rounded object-cover"
-                            />
-                          ) : (
-                            <div className="h-12 w-12 rounded bg-zinc-700" />
-                          )}
-
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-semibold text-white">
-                              {rating.track_name}
-                            </p>
-                            <p className="truncate text-xs text-zinc-400">
-                              {rating.artist_name}
-                            </p>
-                          </div>
-
-                          <div className="shrink-0 text-right">
-                            <p className="text-sm font-semibold text-green-400">
-                              <NoteRating rating={rating.rating} />
-                            </p>
-                            <p className="text-xs text-zinc-400">{rating.rating}/5</p>
-                          </div>
-                        </div>
-
-                        {rating.review && (
-                          <p className="mt-1.5 truncate text-xs italic text-zinc-400">
-                            &ldquo;{rating.review}&rdquo;
-                          </p>
-                        )}
-
-                        {isOwnProfile && (
-                          <div className="mt-2 flex flex-wrap items-center gap-1">
-                            <button
-                              onClick={() => startEditRating(rating)}
-                              disabled={ratingBusy !== ""}
-                              className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
-                            >
-                              ✎
-                            </button>
-                            <button
-                              onClick={() => handleDeleteRating(rating.id)}
-                              disabled={ratingBusy !== ""}
-                              className="rounded border border-red-700 px-2 py-1 text-xs text-red-300 hover:bg-red-950/40 disabled:opacity-50"
-                            >
-                              ✕
-                            </button>
-                            {rating.spotify_track_id && (
-                              <a
-                                href={`https://open.spotify.com/track/${rating.spotify_track_id}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="ml-auto text-xs text-green-400 hover:underline"
-                              >
-                                Listen on Spotify
-                              </a>
-                            )}
-                          </div>
-                        )}
-                        {!isOwnProfile && rating.spotify_track_id && (
-                          <div className="mt-2 flex justify-end">
-                            <a
-                              href={`https://open.spotify.com/track/${rating.spotify_track_id}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-xs text-green-400 hover:underline"
-                            >
-                              Listen on Spotify
-                            </a>
-                          </div>
-                        )}
-                      </>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          </section>
-
-          <section className="rounded-2xl bg-zinc-900 p-5 shadow-lg">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-lg font-bold">Favorite Tracks</h2>
-
-              {isOwnProfile && (
-                <button
-                  onClick={() => {
-                    setShowTrackForm((prev) => !prev);
-                    setTrackMessage("");
-                    setTrackResults([]);
-                    setSelectedTrack(null);
-                    setTrackSearch("");
-                  }}
-                  className="rounded-lg border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
-                >
-                  {showTrackForm ? "Close" : "Add Track"}
-                </button>
-              )}
-            </div>
-
-            {isOwnProfile && showTrackForm && (
-              <div className="mb-6 space-y-4">
-                <form className="space-y-3" onSubmit={handleTrackSearch}>
-                  <input
-                    type="text"
-                    placeholder="Search for a track"
-                    value={trackSearch}
-                    onChange={(e) => setTrackSearch(e.target.value)}
-                    className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-3 text-white outline-none focus:ring-2 focus:ring-green-500"
-                  />
-
-                  <button
-                    type="submit"
-                    disabled={trackSearchLoading}
-                    className="w-full rounded-lg border border-zinc-700 px-4 py-3 font-semibold text-zinc-200 hover:bg-zinc-800 disabled:opacity-60"
-                  >
-                    {trackSearchLoading ? "Searching..." : "Search Tracks"}
-                  </button>
-                </form>
-
-                {trackResults.length > 0 && (
-                  <div className="max-h-72 space-y-3 overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-950/50 p-3">
-                    {trackResults.map((track) => (
-                      <button
-                        key={track.spotify_track_id}
-                        type="button"
-                        onClick={() => setSelectedTrack(track)}
-                        className={`flex w-full items-center gap-3 rounded-lg p-3 text-left transition ${
-                          selectedTrack?.spotify_track_id === track.spotify_track_id
-                            ? "bg-green-500/20 ring-1 ring-green-500"
-                            : "bg-zinc-800/60 hover:bg-zinc-800"
-                        }`}
-                      >
-                        {track.image_url ? (
-                          <img
-                            src={track.image_url}
-                            alt={track.track_name}
-                            className="h-16 w-16 rounded-lg object-cover"
-                          />
-                        ) : (
-                          <div className="h-16 w-16 rounded-lg bg-zinc-700" />
-                        )}
-
-                        <div className="min-w-0">
-                          <p className="truncate font-semibold text-white">
-                            {track.track_name}
-                          </p>
-                          <p className="truncate text-sm text-zinc-400">
-                            {track.artist_name}
-                          </p>
-                          {track.album_name && (
-                            <p className="truncate text-xs text-zinc-500">
-                              {track.album_name}
-                            </p>
-                          )}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                <form
-                  onSubmit={handleAddFavoriteTrack}
-                  className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-950/50 p-4"
-                >
-                  {selectedTrack ? (
-                    <div className="flex items-center gap-3 rounded-lg bg-zinc-800/70 p-3">
-                      {selectedTrack.image_url ? (
-                        <img
-                          src={selectedTrack.image_url}
-                          alt={selectedTrack.track_name}
-                          className="h-16 w-16 rounded-lg object-cover"
-                        />
-                      ) : (
-                        <div className="h-16 w-16 rounded-lg bg-zinc-700" />
-                      )}
-
-                      <div className="min-w-0">
-                        <p className="truncate font-semibold text-white">
-                          {selectedTrack.track_name}
-                        </p>
-                        <p className="truncate text-sm text-zinc-400">
-                          {selectedTrack.artist_name}
-                        </p>
-                        {selectedTrack.album_name && (
-                          <p className="truncate text-xs text-zinc-500">
-                            {selectedTrack.album_name}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="text-sm text-zinc-400">
-                      Select a track above first.
-                    </p>
-                  )}
-
-                  <select
-                    value={trackPosition}
-                    onChange={(e) => setTrackPosition(e.target.value)}
-                    className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-3 text-white outline-none focus:ring-2 focus:ring-green-500"
-                  >
-                    <option value="1">Position #1</option>
-                    <option value="2">Position #2</option>
-                    <option value="3">Position #3</option>
-                    <option value="4">Position #4</option>
-                    <option value="5">Position #5</option>
-                  </select>
-
-                  <button
-                    type="submit"
-                    disabled={trackSubmitting}
-                    className="w-full rounded-lg bg-green-500 px-4 py-3 font-semibold text-black transition hover:bg-green-600 disabled:opacity-60"
-                  >
-                    {trackSubmitting ? "Saving..." : "Save Favorite Track"}
-                  </button>
-
-                  {trackMessage && (
-                    <p className="text-sm text-zinc-300">{trackMessage}</p>
-                  )}
-                </form>
-              </div>
+        {isOwnProfile && (
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setIsEditMode(!isEditMode)}
+              className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
+                isEditMode
+                  ? "bg-green-500 text-black hover:bg-green-600"
+                  : "border border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+              }`}
+            >
+              {isEditMode ? "Done Customizing" : "Customize Profile"}
+            </button>
+            {isEditMode && (
+              <button
+                onClick={() => setShowAddSection(true)}
+                className="rounded-lg border border-green-500 px-4 py-2 text-sm font-semibold text-green-400 hover:bg-green-500/10"
+              >
+                + Add Section
+              </button>
             )}
+          </div>
+        )}
 
-            <div className="space-y-2">
-              {favoriteTracks.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-zinc-700 p-4 text-center text-sm text-zinc-400">
-                  No favorite tracks yet.
-                </div>
-              ) : (
-                favoriteTracks.map((track) => (
-                  <div key={track.id} className="rounded-lg bg-zinc-800/60 p-3 min-h-[7rem]">
-                    <div className="flex items-center gap-3">
-                      {track.image_url ? (
-                        <img
-                          src={track.image_url}
-                          alt={track.track_name}
-                          className="h-12 w-12 rounded object-cover"
-                        />
-                      ) : (
-                        <div className="h-12 w-12 rounded bg-zinc-700" />
-                      )}
-
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-semibold text-white">
-                          {track.track_name}
-                        </p>
-                        <p className="truncate text-xs text-zinc-400">
-                          {track.artist_name}
-                        </p>
-                      </div>
-
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-green-500 text-sm font-bold text-black">
-                        {track.position}
-                      </div>
-                    </div>
-
-                    <p className="mt-1.5 text-xs text-transparent">&nbsp;</p>
-
-                    {isOwnProfile && (
-                      <div className="mt-2 flex flex-wrap items-center gap-1">
-                        <button
-                          onClick={() => moveTrackUp(track)}
-                          disabled={track.position === 1 || busyAction !== ""}
-                          className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
-                        >
-                          ↑
-                        </button>
-                        <button
-                          onClick={() => moveTrackDown(track)}
-                          disabled={track.position === 5 || busyAction !== ""}
-                          className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
-                        >
-                          ↓
-                        </button>
-                        <button
-                          onClick={() => handleDeleteFavoriteTrack(track.id)}
-                          disabled={busyAction !== ""}
-                          className="rounded border border-red-700 px-2 py-1 text-xs text-red-300 hover:bg-red-950/40 disabled:opacity-50"
-                        >
-                          ✕
-                        </button>
-                        {track.spotify_track_id && (
-                          <a
-                            href={`https://open.spotify.com/track/${track.spotify_track_id}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="ml-auto text-xs text-green-400 hover:underline"
-                          >
-                            Listen on Spotify
-                          </a>
-                        )}
-                      </div>
-                    )}
-                    {!isOwnProfile && track.spotify_track_id && (
-                      <div className="mt-2 flex justify-end">
-                        <a
-                          href={`https://open.spotify.com/track/${track.spotify_track_id}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-xs text-green-400 hover:underline"
-                        >
-                          Listen on Spotify
-                        </a>
-                      </div>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          </section>
-
-          <section className="rounded-2xl bg-zinc-900 p-5 shadow-lg">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-lg font-bold">Favorite Albums</h2>
-
-              {isOwnProfile && (
-                <button
-                  onClick={() => {
-                    setShowAlbumForm((prev) => !prev);
-                    setAlbumMessage("");
-                    setAlbumResults([]);
-                    setSelectedAlbum(null);
-                    setAlbumSearch("");
-                  }}
-                  className="rounded-lg border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
+        <DndContext collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={layout.map((s) => s.id)} strategy={rectSortingStrategy}>
+            <div className="grid grid-cols-6 gap-6">
+              {layout.map((section) => (
+                <SortableSection
+                  key={section.id}
+                  id={section.id}
+                  width={section.width}
+                  isEditMode={isEditMode}
+                  onRemove={() => handleRemoveSection(section.id)}
+                  onResize={(w) => handleResizeSection(section.id, w)}
                 >
-                  {showAlbumForm ? "Close" : "Add Album"}
-                </button>
-              )}
+                  {renderSectionContent(section)}
+                </SortableSection>
+              ))}
             </div>
+          </SortableContext>
+        </DndContext>
 
-            {isOwnProfile && showAlbumForm && (
-              <div className="mb-6 space-y-4">
-                <form className="space-y-3" onSubmit={handleAlbumSearch}>
-                  <input
-                    type="text"
-                    placeholder="Search for an album"
-                    value={albumSearch}
-                    onChange={(e) => setAlbumSearch(e.target.value)}
-                    className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-3 text-white outline-none focus:ring-2 focus:ring-green-500"
-                  />
-
-                  <button
-                    type="submit"
-                    disabled={albumSearchLoading}
-                    className="w-full rounded-lg border border-zinc-700 px-4 py-3 font-semibold text-zinc-200 hover:bg-zinc-800 disabled:opacity-60"
-                  >
-                    {albumSearchLoading ? "Searching..." : "Search Albums"}
-                  </button>
-                </form>
-
-                {albumResults.length > 0 && (
-                  <div className="max-h-72 space-y-3 overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-950/50 p-3">
-                    {albumResults.map((album) => (
-                      <button
-                        key={album.spotify_album_id}
-                        type="button"
-                        onClick={() => setSelectedAlbum(album)}
-                        className={`flex w-full items-center gap-3 rounded-lg p-3 text-left transition ${
-                          selectedAlbum?.spotify_album_id === album.spotify_album_id
-                            ? "bg-green-500/20 ring-1 ring-green-500"
-                            : "bg-zinc-800/60 hover:bg-zinc-800"
-                        }`}
-                      >
-                        {album.image_url ? (
-                          <img
-                            src={album.image_url}
-                            alt={album.album_name}
-                            className="h-16 w-16 rounded-lg object-cover"
-                          />
-                        ) : (
-                          <div className="h-16 w-16 rounded-lg bg-zinc-700" />
-                        )}
-
-                        <div className="min-w-0">
-                          <p className="truncate font-semibold text-white">
-                            {album.album_name}
-                          </p>
-                          <p className="truncate text-sm text-zinc-400">
-                            {album.artist_name}
-                          </p>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                <form
-                  onSubmit={handleAddFavoriteAlbum}
-                  className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-950/50 p-4"
-                >
-                  {selectedAlbum ? (
-                    <div className="flex items-center gap-3 rounded-lg bg-zinc-800/70 p-3">
-                      {selectedAlbum.image_url ? (
-                        <img
-                          src={selectedAlbum.image_url}
-                          alt={selectedAlbum.album_name}
-                          className="h-16 w-16 rounded-lg object-cover"
-                        />
-                      ) : (
-                        <div className="h-16 w-16 rounded-lg bg-zinc-700" />
-                      )}
-
-                      <div className="min-w-0">
-                        <p className="truncate font-semibold text-white">
-                          {selectedAlbum.album_name}
-                        </p>
-                        <p className="truncate text-sm text-zinc-400">
-                          {selectedAlbum.artist_name}
-                        </p>
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="text-sm text-zinc-400">
-                      Select an album above first.
-                    </p>
-                  )}
-
-                  <select
-                    value={albumPosition}
-                    onChange={(e) => setAlbumPosition(e.target.value)}
-                    className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-3 text-white outline-none focus:ring-2 focus:ring-green-500"
-                  >
-                    <option value="1">Position #1</option>
-                    <option value="2">Position #2</option>
-                    <option value="3">Position #3</option>
-                    <option value="4">Position #4</option>
-                    <option value="5">Position #5</option>
-                  </select>
-
-                  <button
-                    type="submit"
-                    disabled={albumSubmitting}
-                    className="w-full rounded-lg bg-green-500 px-4 py-3 font-semibold text-black transition hover:bg-green-600 disabled:opacity-60"
-                  >
-                    {albumSubmitting ? "Saving..." : "Save Favorite Album"}
-                  </button>
-
-                  {albumMessage && (
-                    <p className="text-sm text-zinc-300">{albumMessage}</p>
-                  )}
-                </form>
-              </div>
-            )}
-
-            <div className="space-y-2">
-              {favoriteAlbums.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-zinc-700 p-4 text-center text-sm text-zinc-400">
-                  No favorite albums yet.
-                </div>
-              ) : (
-                favoriteAlbums.map((album) => (
-                  <div key={album.id} className="rounded-lg bg-zinc-800/60 p-3 min-h-[7rem]">
-                    <div className="flex items-center gap-3">
-                      {album.image_url ? (
-                        <img
-                          src={album.image_url}
-                          alt={album.album_name}
-                          className="h-12 w-12 rounded object-cover"
-                        />
-                      ) : (
-                        <div className="h-12 w-12 rounded bg-zinc-700" />
-                      )}
-
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-semibold text-white">
-                          {album.album_name}
-                        </p>
-                        <p className="truncate text-xs text-zinc-400">
-                          {album.artist_name}
-                        </p>
-                      </div>
-
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-green-500 text-sm font-bold text-black">
-                        {album.position}
-                      </div>
-                    </div>
-
-                    <p className="mt-1.5 text-xs text-transparent">&nbsp;</p>
-
-                    {isOwnProfile && (
-                      <div className="mt-2 flex flex-wrap items-center gap-1">
-                        <button
-                          onClick={() => moveAlbumUp(album)}
-                          disabled={album.position === 1 || busyAction !== ""}
-                          className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
-                        >
-                          ↑
-                        </button>
-                        <button
-                          onClick={() => moveAlbumDown(album)}
-                          disabled={album.position === 5 || busyAction !== ""}
-                          className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
-                        >
-                          ↓
-                        </button>
-                        <button
-                          onClick={() => handleDeleteFavoriteAlbum(album.id)}
-                          disabled={busyAction !== ""}
-                          className="rounded border border-red-700 px-2 py-1 text-xs text-red-300 hover:bg-red-950/40 disabled:opacity-50"
-                        >
-                          ✕
-                        </button>
-                        {album.spotify_album_id && (
-                          <a
-                            href={`https://open.spotify.com/album/${album.spotify_album_id}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="ml-auto text-xs text-green-400 hover:underline"
-                          >
-                            Listen on Spotify
-                          </a>
-                        )}
-                      </div>
-                    )}
-                    {!isOwnProfile && album.spotify_album_id && (
-                      <div className="mt-2 flex justify-end">
-                        <a
-                          href={`https://open.spotify.com/album/${album.spotify_album_id}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-xs text-green-400 hover:underline"
-                        >
-                          Listen on Spotify
-                        </a>
-                      </div>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          </section>
-        </div>
+        {showAddSection && (
+          <AddSectionModal
+            existingTypes={layout.map((s) => s.type)}
+            onAdd={handleAddSection}
+            onClose={() => setShowAddSection(false)}
+          />
+        )}
       </div>
     </main>
   );
