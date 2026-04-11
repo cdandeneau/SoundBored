@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../utils/supabase/supabaseClient";
+import { getCurrentUserSafe } from "../../utils/supabase/auth";
 import TopNav from "../../components/TopNav";
 import NoteRating from "../components/NoteRating";
 
@@ -41,9 +42,7 @@ export default function RateSongPage() {
 
   useEffect(() => {
     async function loadCurrentProfile() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const user = await getCurrentUserSafe();
 
       if (!user) {
         router.push("/login");
@@ -103,9 +102,7 @@ export default function RateSongPage() {
     e.preventDefault();
     setMessage("");
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getCurrentUserSafe();
 
     if (!user) {
       setMessage("You must be logged in to rate songs.");

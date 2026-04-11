@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "../../utils/supabase/supabaseClient";
+import { getCurrentUserSafe } from "../../utils/supabase/auth";
 import TopNav from "../../components/TopNav";
 import NoteRating from "../components/NoteRating";
 
@@ -26,10 +27,25 @@ type ProfileSummary = {
   username: string;
   display_name: string | null;
   avatar_url: string | null;
+  accent_text_color?: string | null;
 };
 
 type FeedItem = SongRating & {
   profile: ProfileSummary | null;
+};
+
+type SearchResult = ProfileSummary & {
+  followerCount: number;
+  isFollowing: boolean;
+};
+
+type TrendingTrack = {
+  spotify_track_id: string;
+  track_name: string;
+  artist_name: string;
+  image_url: string | null;
+  ratingsCount: number;
+  averageRating: number;
 };
 
 
@@ -65,25 +81,124 @@ function formatTimeAgo(iso: string) {
 export default function FeedPage() {
   const router = useRouter();
 
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [myUsername, setMyUsername] = useState<string | null>(null);
   const [feedItems, setFeedItems] = useState<FeedItem[]>([]);
+  const [trendingTracks, setTrendingTracks] = useState<TrendingTrack[]>([]);
+  const [suggestedUsers, setSuggestedUsers] = useState<SearchResult[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [searchingUsers, setSearchingUsers] = useState(false);
   const [followingCount, setFollowingCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
+
+  async function runUserSearch(rawQuery: string, userIdOverride?: string) {
+    const userId = userIdOverride || currentUserId;
+    if (!userId) return;
+
+    const trimmed = rawQuery.trim();
+    if (!trimmed) {
+      setSearchResults([]);
+      return;
+    }
+
+    setSearchingUsers(true);
+    setMessage("");
+
+    const { data: profilesData, error: profilesError } = await supabase
+      .from("profiles")
+      .select("id, username, display_name, avatar_url, accent_text_color")
+      .neq("id", userId)
+      .or(`username.ilike.%${trimmed}%,display_name.ilike.%${trimmed}%`)
+      .order("username", { ascending: true })
+      .limit(8);
+
+    if (profilesError) {
+      setMessage(profilesError.message);
+      setSearchResults([]);
+      setSearchingUsers(false);
+      return;
+    }
+
+    const profiles = profilesData || [];
+
+    if (profiles.length === 0) {
+      setSearchResults([]);
+      setSearchingUsers(false);
+      return;
+    }
+
+    const ids = profiles.map((profile) => profile.id);
+
+    const { data: myFollowRows, error: myFollowError } = await supabase
+      .from("follows")
+      .select("following_id")
+      .eq("follower_id", userId)
+      .in("following_id", ids);
+
+    if (myFollowError) {
+      setMessage(myFollowError.message);
+      setSearchResults([]);
+      setSearchingUsers(false);
+      return;
+    }
+
+    const { data: followerRows, error: followerRowsError } = await supabase
+      .from("follows")
+      .select("following_id")
+      .in("following_id", ids);
+
+    if (followerRowsError) {
+      setMessage(followerRowsError.message);
+      setSearchResults([]);
+      setSearchingUsers(false);
+      return;
+    }
+
+    const followingSet = new Set(
+      (myFollowRows || []).map((row) => row.following_id)
+    );
+
+    const followerCountMap = new Map<string, number>();
+    for (const id of ids) {
+      followerCountMap.set(id, 0);
+    }
+    for (const row of followerRows || []) {
+      followerCountMap.set(
+        row.following_id,
+        (followerCountMap.get(row.following_id) || 0) + 1
+      );
+    }
+
+    setSearchResults(
+      profiles.map((profile) => ({
+        ...profile,
+        followerCount: followerCountMap.get(profile.id) || 0,
+        isFollowing: followingSet.has(profile.id),
+      }))
+    );
+    setSearchingUsers(false);
+  }
+
+  async function handleSearchSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    await runUserSearch(searchQuery);
+  }
 
   useEffect(() => {
     async function loadFeed() {
       setLoading(true);
       setMessage("");
 
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const user = await getCurrentUserSafe();
 
       if (!user) {
         router.push("/login");
         return;
       }
+
+      setCurrentUserId(user.id);
 
       const { data: myProfileData } = await supabase
         .from("profiles")
@@ -108,6 +223,125 @@ export default function FeedPage() {
 
       const followingIds = (followsData || []).map((row) => row.following_id);
       setFollowingCount(followingIds.length);
+
+      // This week's top tracks from app activity (ratings), used to keep the feed lively.
+      const weekAgoIso = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      const { data: weekRatings, error: weekRatingsError } = await supabase
+        .from("song_ratings")
+        .select("spotify_track_id, track_name, artist_name, image_url, rating, updated_at")
+        .gte("updated_at", weekAgoIso)
+        .order("updated_at", { ascending: false })
+        .limit(500);
+
+      if (weekRatingsError) {
+        setMessage(weekRatingsError.message);
+      } else {
+        const grouped = new Map<
+          string,
+          {
+            spotify_track_id: string;
+            track_name: string;
+            artist_name: string;
+            image_url: string | null;
+            ratingsCount: number;
+            ratingSum: number;
+          }
+        >();
+
+        for (const row of weekRatings || []) {
+          const key = row.spotify_track_id;
+          const current = grouped.get(key);
+          if (current) {
+            current.ratingsCount += 1;
+            current.ratingSum += Number(row.rating || 0);
+          } else {
+            grouped.set(key, {
+              spotify_track_id: row.spotify_track_id,
+              track_name: row.track_name,
+              artist_name: row.artist_name,
+              image_url: row.image_url,
+              ratingsCount: 1,
+              ratingSum: Number(row.rating || 0),
+            });
+          }
+        }
+
+        const topTracks = Array.from(grouped.values())
+          .map((track) => ({
+            spotify_track_id: track.spotify_track_id,
+            track_name: track.track_name,
+            artist_name: track.artist_name,
+            image_url: track.image_url,
+            ratingsCount: track.ratingsCount,
+            averageRating:
+              track.ratingsCount > 0 ? track.ratingSum / track.ratingsCount : 0,
+          }))
+          .sort((a, b) => {
+            if (b.ratingsCount !== a.ratingsCount) {
+              return b.ratingsCount - a.ratingsCount;
+            }
+            return b.averageRating - a.averageRating;
+          })
+          .slice(0, 5);
+
+        setTrendingTracks(topTracks);
+      }
+
+      const { data: allProfiles, error: allProfilesError } = await supabase
+        .from("profiles")
+        .select("id, username, display_name, avatar_url, accent_text_color")
+        .neq("id", user.id)
+        .order("username", { ascending: true })
+        .limit(40);
+
+      if (allProfilesError) {
+        setMessage(allProfilesError.message);
+      } else {
+        const candidates = allProfiles || [];
+        const candidateIds = candidates.map((profile) => profile.id);
+
+        if (candidateIds.length > 0) {
+          const { data: followingRows } = await supabase
+            .from("follows")
+            .select("following_id")
+            .eq("follower_id", user.id)
+            .in("following_id", candidateIds);
+
+          const { data: followerRows } = await supabase
+            .from("follows")
+            .select("following_id")
+            .in("following_id", candidateIds);
+
+          const followingSet = new Set(
+            (followingRows || []).map((row) => row.following_id)
+          );
+
+          const followerCountMap = new Map<string, number>();
+          for (const id of candidateIds) {
+            followerCountMap.set(id, 0);
+          }
+          for (const row of followerRows || []) {
+            followerCountMap.set(
+              row.following_id,
+              (followerCountMap.get(row.following_id) || 0) + 1
+            );
+          }
+
+          const suggestions: SearchResult[] = candidates
+            .map((profile) => ({
+              ...profile,
+              followerCount: followerCountMap.get(profile.id) || 0,
+              isFollowing: followingSet.has(profile.id),
+            }))
+            .filter((profile) => !profile.isFollowing)
+            .sort((a, b) => b.followerCount - a.followerCount)
+            .slice(0, 5);
+
+          setSuggestedUsers(suggestions);
+        } else {
+          setSuggestedUsers([]);
+        }
+      }
 
       if (followingIds.length === 0) {
         setFeedItems([]);
@@ -139,7 +373,7 @@ export default function FeedPage() {
       if (ratingUsers.length > 0) {
         const { data: profileData, error: profileError } = await supabase
           .from("profiles")
-          .select("id, username, display_name, avatar_url")
+          .select("id, username, display_name, avatar_url, accent_text_color")
           .in("id", ratingUsers);
 
         if (profileError) {
@@ -193,11 +427,166 @@ export default function FeedPage() {
               showMyProfile
               myProfileUsername={myUsername}
               showFeed={false}
-              showUsers
+              showUsers={false}
               showRate
             />
           </div>
+
+          <form onSubmit={handleSearchSubmit} className="mt-6 space-y-3">
+            <div className="flex gap-3">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search users by username or display name"
+                className="flex-1 rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-3 text-white outline-none focus:ring-2 focus:ring-green-500"
+              />
+              <button
+                type="submit"
+                disabled={searchingUsers}
+                className="rounded-lg bg-green-500 px-5 py-3 font-semibold text-black transition hover:bg-green-600 disabled:opacity-60"
+              >
+                {searchingUsers ? "Searching..." : "Search"}
+              </button>
+            </div>
+
+            {searchResults.length > 0 && (
+              <div className="space-y-2 rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
+                {searchResults.map((user) => (
+                  <Link
+                    key={user.id}
+                    href={`/profile/${user.username}`}
+                    className="flex items-center justify-between rounded-lg bg-zinc-800/70 px-3 py-2 hover:bg-zinc-800"
+                  >
+                    <div className="flex items-center gap-3">
+                      {user.avatar_url ? (
+                        <img
+                          src={user.avatar_url}
+                          alt={user.username}
+                          className="h-8 w-8 rounded-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-700 text-xs font-bold text-green-400">
+                          {user.display_name?.[0]?.toUpperCase() ||
+                            user.username?.[0]?.toUpperCase() ||
+                            "U"}
+                        </div>
+                      )}
+                      <div>
+                        <p className="text-sm font-semibold text-white">
+                          {user.display_name || user.username}
+                        </p>
+                        <p className="text-xs text-zinc-400">@{user.username}</p>
+                      </div>
+                    </div>
+                    <p className="text-xs text-zinc-500">
+                      {user.followerCount} follower{user.followerCount === 1 ? "" : "s"}
+                    </p>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </form>
         </div>
+
+        <section className="rounded-2xl bg-zinc-900 p-6 shadow-lg">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-2xl font-semibold">Top Tracks This Week</h2>
+            <p className="text-xs uppercase tracking-wide text-zinc-500">
+              Based on SoundBored ratings
+            </p>
+          </div>
+
+          {trendingTracks.length === 0 ? (
+            <p className="text-sm text-zinc-400">
+              Not enough rating activity yet this week.
+            </p>
+          ) : (
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+              {trendingTracks.map((track, index) => (
+                <article
+                  key={track.spotify_track_id}
+                  className="rounded-xl bg-zinc-800/70 p-3"
+                >
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="rounded-full bg-green-500 px-2 py-0.5 text-xs font-bold text-black">
+                      #{index + 1}
+                    </span>
+                    <span className="text-xs text-zinc-400">
+                      {track.ratingsCount} ratings
+                    </span>
+                  </div>
+                  {track.image_url ? (
+                    <img
+                      src={track.image_url}
+                      alt={track.track_name}
+                      className="mb-2 h-28 w-full rounded-lg object-cover"
+                    />
+                  ) : (
+                    <div className="mb-2 h-28 w-full rounded-lg bg-zinc-700" />
+                  )}
+                  <p className="truncate text-sm font-semibold text-white">
+                    {track.track_name}
+                  </p>
+                  <p className="truncate text-xs text-zinc-400">{track.artist_name}</p>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    Avg: {track.averageRating.toFixed(1)}/5
+                  </p>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="rounded-2xl bg-zinc-900 p-6 shadow-lg">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-2xl font-semibold">People You Might Like</h2>
+            <Link href="/users" className="text-sm text-green-400 hover:underline">
+              Browse all users
+            </Link>
+          </div>
+
+          {suggestedUsers.length === 0 ? (
+            <p className="text-sm text-zinc-400">
+              Follow more people and we&apos;ll suggest similar listeners here.
+            </p>
+          ) : (
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+              {suggestedUsers.map((user) => (
+                <Link
+                  key={user.id}
+                  href={`/profile/${user.username}`}
+                  className="rounded-xl bg-zinc-800/70 p-3 hover:bg-zinc-800"
+                >
+                  <div className="mb-2 flex items-center gap-2">
+                    {user.avatar_url ? (
+                      <img
+                        src={user.avatar_url}
+                        alt={user.username}
+                        className="h-9 w-9 rounded-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-zinc-700 text-xs font-bold text-green-400">
+                        {user.display_name?.[0]?.toUpperCase() ||
+                          user.username?.[0]?.toUpperCase() ||
+                          "U"}
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-white">
+                        {user.display_name || user.username}
+                      </p>
+                      <p className="truncate text-xs text-zinc-400">@{user.username}</p>
+                    </div>
+                  </div>
+                  <p className="text-xs text-zinc-500">
+                    {user.followerCount} follower{user.followerCount === 1 ? "" : "s"}
+                  </p>
+                </Link>
+              ))}
+            </div>
+          )}
+        </section>
 
         {message && (
           <div className="rounded-xl border border-red-800 bg-red-950/40 p-4 text-sm text-red-200">
@@ -230,7 +619,12 @@ export default function FeedPage() {
           </section>
         ) : (
           <section className="space-y-4">
-            {feedItems.map((item) => (
+            {feedItems.map((item) => {
+              const accentColor = /^#[0-9a-fA-F]{6}$/.test(item.profile?.accent_text_color || "")
+                ? (item.profile?.accent_text_color as string)
+                : "#22c55e";
+
+              return (
               <article
                 key={item.id}
                 className="rounded-2xl bg-zinc-900 p-5 shadow-lg"
@@ -257,7 +651,7 @@ export default function FeedPage() {
                               className="h-6 w-6 rounded-full object-cover"
                             />
                           ) : (
-                            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-zinc-800 text-xs font-bold text-green-400">
+                            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-zinc-800 text-xs font-bold" style={{ color: accentColor }}>
                               {item.profile?.display_name?.[0]?.toUpperCase() ||
                                 item.profile?.username?.[0]?.toUpperCase() ||
                                 "U"}
@@ -268,7 +662,8 @@ export default function FeedPage() {
                             <>
                               <Link
                                 href={`/profile/${item.profile.username}`}
-                                className="font-semibold text-green-400 hover:underline"
+                                className="font-semibold hover:underline"
+                                style={{ color: accentColor }}
                               >
                                 {item.profile.display_name ||
                                   item.profile.username}
@@ -297,7 +692,7 @@ export default function FeedPage() {
                       </div>
 
                       <div className="shrink-0 text-left sm:text-right">
-                        <p className="text-2xl font-semibold text-green-400">
+                        <p className="text-2xl font-semibold" style={{ color: accentColor }}>
                           <NoteRating rating={item.rating} />
                         </p>
                         <p className="text-sm text-zinc-400">
@@ -317,7 +712,8 @@ export default function FeedPage() {
                   </div>
                 </div>
               </article>
-            ))}
+              );
+            })}
           </section>
         )}
       </div>

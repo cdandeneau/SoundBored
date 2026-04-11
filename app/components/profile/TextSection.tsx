@@ -6,6 +6,7 @@ type Props = {
   title: string;
   content: string;
   isOwnProfile: boolean;
+  outerBackgroundColor?: string;
   onSave?: (title: string, content: string) => void;
 };
 
@@ -13,6 +14,7 @@ export default function TextSection({
   title,
   content,
   isOwnProfile,
+  outerBackgroundColor,
   onSave,
 }: Props) {
   const [isEditing, setIsEditing] = useState(false);
@@ -25,7 +27,7 @@ export default function TextSection({
   }
 
   return (
-    <div className="h-full rounded-2xl bg-zinc-900 p-5 shadow-lg">
+    <div className="h-full rounded-2xl p-5 shadow-lg" style={outerBackgroundColor ? { backgroundColor: outerBackgroundColor } : { backgroundColor: "#18181b" }}>
       {isEditing ? (
         <div className="space-y-3">
           <input

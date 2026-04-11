@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 type PlaylistTrack = {
   spotify_track_id: string;
@@ -13,6 +13,10 @@ type Props = {
   title: string;
   tracks: PlaylistTrack[];
   isOwnProfile: boolean;
+  canCustomize?: boolean;
+  accentTextColor?: string;
+  outerBackgroundColor?: string;
+  innerBackgroundColor?: string;
   onUpdateTitle?: (title: string) => void;
   onAddTrack?: (track: PlaylistTrack) => void;
   onRemoveTrack?: (spotifyTrackId: string) => void;
@@ -22,6 +26,10 @@ export default function CustomPlaylistSection({
   title,
   tracks,
   isOwnProfile,
+  canCustomize = false,
+  accentTextColor,
+  outerBackgroundColor,
+  innerBackgroundColor,
   onUpdateTitle,
   onAddTrack,
   onRemoveTrack,
@@ -32,6 +40,16 @@ export default function CustomPlaylistSection({
   const [searchLoading, setSearchLoading] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState(title);
+  const showCustomizeControls = isOwnProfile && canCustomize;
+
+  useEffect(() => {
+    if (!showCustomizeControls) {
+      setShowSearch(false);
+      setEditingTitle(false);
+      setSearchQuery("");
+      setSearchResults([]);
+    }
+  }, [showCustomizeControls]);
 
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault();
@@ -57,7 +75,7 @@ export default function CustomPlaylistSection({
   }
 
   return (
-    <div className="h-full rounded-2xl bg-zinc-900 p-5 shadow-lg">
+    <div className="h-full rounded-2xl p-5 shadow-lg" style={outerBackgroundColor ? { backgroundColor: outerBackgroundColor } : { backgroundColor: "#18181b" }}>
       <div className="mb-3 flex items-center justify-between">
         {editingTitle ? (
           <div className="flex items-center gap-2">
@@ -86,8 +104,8 @@ export default function CustomPlaylistSection({
           </div>
         ) : (
           <div className="flex items-center gap-2">
-            <h2 className="text-lg font-bold">{title}</h2>
-            {isOwnProfile && (
+            <h2 className="text-lg font-bold" style={accentTextColor ? { color: accentTextColor } : undefined}>{title}</h2>
+            {showCustomizeControls && (
               <button
                 onClick={() => {
                   setTitleDraft(title);
@@ -101,7 +119,7 @@ export default function CustomPlaylistSection({
           </div>
         )}
 
-        {isOwnProfile && !editingTitle && (
+        {showCustomizeControls && !editingTitle && (
           <button
             onClick={() => setShowSearch(!showSearch)}
             className="rounded-lg border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
@@ -111,7 +129,7 @@ export default function CustomPlaylistSection({
         )}
       </div>
 
-      {showSearch && (
+      {showSearch && showCustomizeControls && (
         <div className="mb-4 space-y-3">
           <form onSubmit={handleSearch} className="flex gap-2">
             <input
@@ -136,6 +154,7 @@ export default function CustomPlaylistSection({
                   key={t.spotify_track_id}
                   onClick={() => selectTrack(t)}
                   className="flex w-full items-center gap-3 rounded-lg bg-zinc-800/60 p-2 text-left hover:bg-zinc-800"
+                  style={innerBackgroundColor ? { backgroundColor: innerBackgroundColor } : undefined}
                 >
                   {t.image_url && (
                     <img
@@ -171,6 +190,7 @@ export default function CustomPlaylistSection({
             <div
               key={`${track.spotify_track_id}-${idx}`}
               className="flex items-center gap-3 rounded-lg bg-zinc-800/60 p-3"
+              style={innerBackgroundColor ? { backgroundColor: innerBackgroundColor } : undefined}
             >
               {track.image_url ? (
                 <img
@@ -195,12 +215,13 @@ export default function CustomPlaylistSection({
                     href={`https://open.spotify.com/track/${track.spotify_track_id}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-xs text-green-400 hover:underline"
+                    className="text-xs hover:underline"
+                    style={accentTextColor ? { color: accentTextColor } : undefined}
                   >
                     Spotify
                   </a>
                 )}
-                {isOwnProfile && (
+                {showCustomizeControls && (
                   <button
                     onClick={() => onRemoveTrack?.(track.spotify_track_id)}
                     className="rounded border border-red-700 px-2 py-1 text-xs text-red-300 hover:bg-red-950/40"

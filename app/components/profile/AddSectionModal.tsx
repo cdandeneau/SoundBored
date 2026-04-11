@@ -44,6 +44,13 @@ const SECTION_TYPES = [
     unique: false,
   },
   {
+    type: "concert-ticket",
+    label: "Concert Ticket Stub",
+    description: "Share a live show ticket with artist, tour, and date",
+    icon: "▦",
+    unique: false,
+  },
+  {
     type: "text",
     label: "Text Box",
     description: "Add custom text content",

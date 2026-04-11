@@ -43,6 +43,8 @@ type Props = {
   variant?: "vinyl" | "cd";
   colors?: Partial<PlayerColors>;
   isOwnProfile: boolean;
+  canCustomize?: boolean;
+  outerBackgroundColor?: string;
   onSelectTrack?: (track: VinylTrack) => void;
   onUpdateColors?: (colors: PlayerColors) => void;
 };
@@ -53,6 +55,8 @@ export default function VinylPlayer({
   variant = "vinyl",
   colors: colorsProp,
   isOwnProfile,
+  canCustomize = false,
+  outerBackgroundColor,
   onSelectTrack,
   onUpdateColors,
 }: Props) {
@@ -174,13 +178,23 @@ export default function VinylPlayer({
 
   const isVinyl = variant === "vinyl";
   const shouldSpin = isSpinning || isPlaying;
+  const showCustomizeControls = isOwnProfile && canCustomize;
+
+  useEffect(() => {
+    if (!showCustomizeControls) {
+      setShowColors(false);
+      setSearching(false);
+      setSearchQuery("");
+      setSearchResults([]);
+    }
+  }, [showCustomizeControls]);
 
   return (
-    <div className="h-full rounded-2xl bg-zinc-900 p-5 shadow-lg">
+    <div className="h-full rounded-2xl p-5 shadow-lg" style={outerBackgroundColor ? { backgroundColor: outerBackgroundColor } : { backgroundColor: "#18181b" }}>
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-lg font-bold">{title}</h2>
         <div className="flex gap-2">
-          {isOwnProfile && (
+          {showCustomizeControls && (
             <>
               <button
                 onClick={() => { setShowColors(!showColors); setSearching(false); }}
@@ -200,7 +214,7 @@ export default function VinylPlayer({
       </div>
 
       {/* Color customizer */}
-      {showColors && isOwnProfile && (
+      {showColors && showCustomizeControls && (
         <div className="mb-4 grid grid-cols-2 gap-2">
           {(isVinyl
             ? ([
@@ -234,7 +248,7 @@ export default function VinylPlayer({
       )}
 
       {/* Search */}
-      {searching && (
+      {searching && showCustomizeControls && (
         <div className="mb-4 space-y-3">
           <form onSubmit={handleSearch} className="flex gap-2">
             <input

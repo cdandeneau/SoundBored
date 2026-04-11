@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { supabase } from '@/utils/supabase/supabaseClient';
+import { getCurrentUserSafe } from '@/utils/supabase/auth';
 import { useRouter } from 'next/navigation';
 
 interface FollowButtonProps {
@@ -20,7 +21,7 @@ export default function FollowButton({ targetUserId, initialIsFollowing }: Follo
     // Optimistic UI update
     setIsFollowing(!isFollowing);
 
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getCurrentUserSafe();
     if (!user) return; // Prompt login here if preferred
 
     if (isFollowing) {

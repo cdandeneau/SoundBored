@@ -4,8 +4,11 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { supabase } from "../../../../utils/supabase/supabaseClient";
+import { getCurrentUserSafe } from "../../../../utils/supabase/auth";
 import TopNav from "../../../../components/TopNav";
 import NoteRating from "../../../components/NoteRating";
+
+const DEFAULT_ACCENT_TEXT_COLOR = "#22c55e";
 
 function formatNotesText(rating: number) {
   const fullNotes = Math.floor(rating);
@@ -19,6 +22,7 @@ type Profile = {
   display_name: string | null;
   bio: string | null;
   avatar_url: string | null;
+  accent_text_color?: string | null;
 };
 
 type SongRating = {
@@ -56,6 +60,7 @@ export default function ProfileRatingsPage() {
 
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [isOwnProfile, setIsOwnProfile] = useState(false);
+  const [accentTextColor, setAccentTextColor] = useState(DEFAULT_ACCENT_TEXT_COLOR);
 
   const [editingRatingId, setEditingRatingId] = useState<string | null>(null);
   const [editRatingValue, setEditRatingValue] = useState("");
@@ -69,14 +74,12 @@ export default function ProfileRatingsPage() {
       setLoading(true);
       setNotFound(false);
 
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const user = await getCurrentUserSafe();
       setCurrentUserId(user?.id || null);
 
       const { data: profileData, error: profileError } = await supabase
         .from("profiles")
-        .select("id, username, display_name, bio, avatar_url")
+        .select("id, username, display_name, bio, avatar_url, accent_text_color")
         .eq("username", username.toLowerCase())
         .single();
 
@@ -87,6 +90,12 @@ export default function ProfileRatingsPage() {
       }
 
       setProfile(profileData);
+
+      if (/^#[0-9a-fA-F]{6}$/.test(profileData.accent_text_color || "")) {
+        setAccentTextColor(profileData.accent_text_color as string);
+      } else {
+        setAccentTextColor(DEFAULT_ACCENT_TEXT_COLOR);
+      }
 
       setIsOwnProfile(!!user?.id && user.id === profileData.id);
 
@@ -234,7 +243,7 @@ export default function ProfileRatingsPage() {
                   className="h-16 w-16 rounded-full object-cover"
                 />
               ) : (
-                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-zinc-800 text-2xl font-bold text-green-400">
+                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-zinc-800 text-2xl font-bold" style={{ color: accentTextColor }}>
                   {profile.display_name?.[0]?.toUpperCase() ||
                     profile.username?.[0]?.toUpperCase() ||
                     "U"}
@@ -259,7 +268,7 @@ export default function ProfileRatingsPage() {
               </div>
               <div>
                 <p className="text-xs text-zinc-500">Average</p>
-                <p className="text-xl font-bold text-green-400">{stats.average}</p>
+                <p className="text-xl font-bold" style={{ color: accentTextColor }}>{stats.average}</p>
               </div>
               <div>
                 <p className="text-xs text-zinc-500">Reviews</p>
@@ -326,7 +335,7 @@ export default function ProfileRatingsPage() {
                             <h3 className="truncate text-2xl font-bold tracking-tight text-white">
                               {rating.track_name}
                             </h3>
-                            <p className="mt-1 text-base text-zinc-300">
+                            <p className="mt-1 text-base" style={{ color: accentTextColor }}>
                               {rating.artist_name}
                               {rating.album_name ? (
                                 <span className="text-zinc-500">
@@ -338,10 +347,10 @@ export default function ProfileRatingsPage() {
                           </div>
 
                           <div className="text-left md:text-right">
-                            <p className="text-xl font-semibold text-green-400">
+                            <p className="text-xl font-semibold" style={{ color: accentTextColor }}>
                               <NoteRating rating={rating.rating} />
                             </p>
-                            <p className="mt-1 text-sm text-zinc-400">
+                            <p className="mt-1 text-sm" style={{ color: accentTextColor }}>
                               {rating.rating}/5 · Reviewed{" "}
                               {formatDate(rating.updated_at)}
                             </p>
@@ -350,13 +359,13 @@ export default function ProfileRatingsPage() {
 
                         {rating.review?.trim() ? (
                           <div className="mt-4 max-w-4xl">
-                            <p className="text-lg leading-8 text-zinc-200">
+                            <p className="text-lg leading-8" style={{ color: accentTextColor }}>
                               &ldquo;{rating.review}&rdquo;
                             </p>
                           </div>
                         ) : (
                           <div className="mt-4">
-                            <p className="italic text-zinc-500">
+                            <p className="italic" style={{ color: accentTextColor }}>
                               No written review for this rating.
                             </p>
                           </div>
@@ -425,7 +434,8 @@ export default function ProfileRatingsPage() {
                                 href={`https://open.spotify.com/track/${rating.spotify_track_id}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="ml-auto text-sm text-green-400 hover:underline"
+                                className="ml-auto text-sm hover:underline"
+                                style={{ color: accentTextColor }}
                               >
                                 Listen on Spotify
                               </a>
@@ -437,7 +447,8 @@ export default function ProfileRatingsPage() {
                               href={`https://open.spotify.com/track/${rating.spotify_track_id}`}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="text-sm text-green-400 hover:underline"
+                              className="text-sm hover:underline"
+                              style={{ color: accentTextColor }}
                             >
                               Listen on Spotify
                             </a>

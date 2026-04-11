@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "../../utils/supabase/supabaseClient";
+import { getCurrentUserSafe } from "../../utils/supabase/auth";
 
 export default function Dashboard() {
   const router = useRouter();
@@ -14,9 +15,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     async function loadUserData() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const user = await getCurrentUserSafe();
 
       if (!user) {
         router.push("/login");

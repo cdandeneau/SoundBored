@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../utils/supabase/supabaseClient";
+import { getCurrentUserSafe } from "../../utils/supabase/auth";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -26,9 +27,7 @@ export default function LoginPage() {
       return;
     }
 
-        const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getCurrentUserSafe();
 
     if (user) {
       const { data: profileData } = await supabase

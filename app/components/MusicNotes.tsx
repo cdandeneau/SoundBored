@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
+import { supabase } from "../../utils/supabase/supabaseClient";
+import { getCurrentUserSafe } from "../../utils/supabase/auth";
 
 const NOTES = ["♪", "♫", "♬", "♩", "𝄞"];
 const NOTE_COUNT = 35;
-const GLOW_COLOR = "rgba(34,197,94,";
+const DEFAULT_NOTE_COLOR = "#22c55e";
 
 interface Note {
   x: number;
@@ -20,11 +23,76 @@ interface Note {
   driftPhase: number;
 }
 
+function isValidHexColor(value: string | null | undefined): value is string {
+  return !!value && /^#[0-9a-fA-F]{6}$/.test(value);
+}
+
+function hexToRgb(hex: string): { r: number; g: number; b: number } {
+  const normalized = hex.replace("#", "");
+  const r = parseInt(normalized.slice(0, 2), 16);
+  const g = parseInt(normalized.slice(2, 4), 16);
+  const b = parseInt(normalized.slice(4, 6), 16);
+  return { r, g, b };
+}
+
 export default function MusicNotes() {
+  const pathname = usePathname();
+  const [noteColor, setNoteColor] = useState(DEFAULT_NOTE_COLOR);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const notesRef = useRef<Note[]>([]);
   const mouseRef = useRef({ x: -1000, y: -1000 });
   const frameRef = useRef<number>(0);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function resolveNoteColor() {
+      const pathParts = pathname.split("/").filter(Boolean);
+      const isProfileRoute = pathParts[0] === "profile" && !!pathParts[1];
+
+      if (isProfileRoute) {
+        const username = decodeURIComponent(pathParts[1]);
+        const { data, error } = await supabase
+          .from("profiles")
+          .select("note_color")
+          .eq("username", username.toLowerCase())
+          .maybeSingle();
+
+        if (!cancelled) {
+          const color = !error && isValidHexColor(data?.note_color)
+            ? data.note_color
+            : DEFAULT_NOTE_COLOR;
+          setNoteColor(color);
+        }
+        return;
+      }
+
+      const user = await getCurrentUserSafe();
+      if (!user) {
+        if (!cancelled) setNoteColor(DEFAULT_NOTE_COLOR);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("note_color")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (!cancelled) {
+        const color = !error && isValidHexColor(data?.note_color)
+          ? data.note_color
+          : DEFAULT_NOTE_COLOR;
+        setNoteColor(color);
+      }
+    }
+
+    resolveNoteColor();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -74,6 +142,8 @@ export default function MusicNotes() {
       if (!ctx || !canvas) return;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+      const { r, g, b } = hexToRgb(noteColor);
+
       time++;
       const mouse = mouseRef.current;
 
@@ -111,9 +181,9 @@ export default function MusicNotes() {
         ctx.textBaseline = "middle";
 
         // Glow layers
-        ctx.shadowColor = `${GLOW_COLOR}${(glowIntensity * 0.7).toFixed(2)})`;
+        ctx.shadowColor = `rgba(${r},${g},${b},${(glowIntensity * 0.7).toFixed(2)})`;
         ctx.shadowBlur = 15 + glowIntensity * 15;
-        ctx.fillStyle = `${GLOW_COLOR}${alpha.toFixed(2)})`;
+        ctx.fillStyle = `rgba(${r},${g},${b},${alpha.toFixed(2)})`;
         ctx.fillText(note.char, drawX, drawY);
 
         // Second pass for stronger glow
@@ -139,7 +209,7 @@ export default function MusicNotes() {
       window.removeEventListener("resize", resize);
       resizeObserver.disconnect();
     };
-  }, []);
+  }, [noteColor]);
 
   return (
     <canvas
