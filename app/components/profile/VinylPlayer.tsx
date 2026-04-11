@@ -162,9 +162,9 @@ export default function VinylPlayer({
 
   // Toggle play/pause for the current track
   function togglePlay() {
+    setIsPlaying((p) => !p);
     if (controllerRef.current) {
       controllerRef.current.togglePlay();
-      setIsPlaying((p) => !p);
     }
   }
 
@@ -336,14 +336,15 @@ export default function VinylPlayer({
             >
               {/* Record disc */}
               <div
-                className="absolute flex items-center justify-center rounded-full"
+                className={`absolute flex items-center justify-center rounded-full${shouldSpin ? " animate-spin" : ""}`}
                 style={{
                   width: 145,
                   height: 145,
                   backgroundColor: "#181312",
                   top: 10,
                   left: 16,
-                  animation: shouldSpin ? `spin-vinyl ${3 / Math.max(speed, 0.1)}s linear infinite` : undefined,
+                  animationDuration: `${3 / Math.max(speed, 0.1)}s`,
+                  animationTimingFunction: "linear",
                 }}
               >
                 {/* grooves */}
@@ -500,6 +501,7 @@ export default function VinylPlayer({
                   onChange={(e) => setSpeed(parseFloat(e.target.value))}
                   className="record-player-slider"
                   style={{
+                    "--slider-thumb-color": colors.buttonBorder,
                     transform: "rotate(-90deg)",
                     width: 75,
                     height: 6,
@@ -509,7 +511,7 @@ export default function VinylPlayer({
                     outline: "none",
                     borderRadius: 3,
                     border: `4px solid ${colors.body}`,
-                  }}
+                  } as React.CSSProperties}
                 />
               </div>
             </div>
@@ -541,16 +543,56 @@ export default function VinylPlayer({
 
               {/* CD disc */}
               <div
-                className="cd-disc absolute"
+                className={`absolute${shouldSpin ? " animate-spin" : ""}`}
                 style={{
                   width: 150,
                   height: 150,
                   top: 25,
                   left: 35,
+                  borderRadius: "50%",
+                  border: "1px solid grey",
+                  background: "conic-gradient(white, white, white, grey, grey, violet, deepskyblue, aqua, palegreen, yellow, orange, red, grey, grey, white, white, white, white, grey, grey, violet, deepskyblue, aqua, palegreen, yellow, orange, red, grey, grey, white)",
                   boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
-                  animation: shouldSpin ? "spin-vinyl 4s linear infinite" : undefined,
+                  animationDuration: "4s",
+                  animationTimingFunction: "linear",
                 }}
-              />
+              >
+                {/* Center ring */}
+                <div
+                  style={{
+                    position: "absolute",
+                    width: 45,
+                    height: 45,
+                    top: "50%",
+                    left: "50%",
+                    transform: "translate(-50%, -50%)",
+                    borderRadius: "50%",
+                    background: "lightgrey",
+                    backgroundClip: "padding-box",
+                    border: "10px solid rgba(0,0,0,0.2)",
+                    boxShadow: "0 0 1px grey",
+                    boxSizing: "border-box",
+                  }}
+                />
+                {/* Center hole */}
+                <div
+                  style={{
+                    position: "absolute",
+                    width: 27,
+                    height: 27,
+                    top: "50%",
+                    left: "50%",
+                    transform: "translate(-50%, -50%)",
+                    borderRadius: "50%",
+                    background: "white",
+                    backgroundClip: "padding-box",
+                    border: "10px solid rgba(0,0,0,0.1)",
+                    boxShadow: "0 0 1px grey",
+                    filter: "drop-shadow(0 0 2px grey)",
+                    boxSizing: "border-box",
+                  }}
+                />
+              </div>
 
               {/* CD mechanism — wide rounded panel with motor hub */}
               <div

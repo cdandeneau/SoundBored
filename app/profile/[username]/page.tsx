@@ -151,10 +151,10 @@ function getProfileCardPatternStyle(
   }
 
   if (pattern === "waves") {
+    const waveSvg = `<svg xmlns='http://www.w3.org/2000/svg' width='60' height='20'><path d='M0 10 C15 0 30 0 30 10 C30 20 45 20 60 10' stroke='${rgba}' stroke-width='2' fill='none'/></svg>`;
     return {
-      backgroundImage: `radial-gradient(circle at 0 100%, ${rgba} 0, ${rgba} 18%, transparent 19%), radial-gradient(circle at 50% 100%, ${rgba} 0, ${rgba} 18%, transparent 19%)`,
-      backgroundSize: "36px 18px",
-      backgroundPosition: "0 0, 18px 9px",
+      backgroundImage: `url("data:image/svg+xml,${encodeURIComponent(waveSvg)}")`,
+      backgroundSize: "60px 20px",
     };
   }
 
@@ -905,8 +905,8 @@ export default function ProfilePage() {
     setPlacedStickers(stickers);
     if (!currentUserId) return;
     if (stickerSaveTimeoutRef.current) clearTimeout(stickerSaveTimeoutRef.current);
-    stickerSaveTimeoutRef.current = setTimeout(() => {
-      supabase.from("profiles").update({ stickers }).eq("id", currentUserId);
+    stickerSaveTimeoutRef.current = setTimeout(async () => {
+      await supabase.from("profiles").update({ stickers }).eq("id", currentUserId);
     }, 500);
   }
 

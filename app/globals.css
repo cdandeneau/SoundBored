@@ -121,6 +121,14 @@
   appearance: none;
   width: 8px;
   height: 10px;
-  background-color: #ffffff;
+  background-color: var(--slider-thumb-color, #ffffff);
+  cursor: pointer;
+}
+
+.record-player-slider::-moz-range-thumb {
+  width: 8px;
+  height: 10px;
+  background-color: var(--slider-thumb-color, #ffffff);
+  border: none;
   cursor: pointer;
 }
