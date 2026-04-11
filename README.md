@@ -1,6 +1,6 @@
 # SoundBored
 
-A full-stack social music web application where users can sign up, log in, and eventually rate songs and albums, build tier lists, and follow friends to see music activity.
+A full-stack social music web application where users can sign up, log in, rate songs, build custom profiles, and follow friends to see music activity.
 
 ## Tech Stack
 
@@ -9,45 +9,62 @@ A full-stack social music web application where users can sign up, log in, and e
 - **API:** Spotify Web API
 - **Styling:** Tailwind CSS
 
-## Current Sprint 1 Functionality
+## Finalized Features
 
-- Beta landing page
-- User signup and login
+- User signup, login, and logout
 - Supabase authentication integration
-- User profile data stored in a `profiles` table
-- Protected dashboard page
-- Logout functionality
+- Public user profiles with customizable grid layouts, themes, and patterns
+- Drag-and-drop profile section reordering and resizing
+- Profile stickers (built-in and custom uploads)
+- Song ratings with reviews
+- Favorite tracks and albums (via Spotify search)
+- Vinyl and CD player profile sections
+- Custom playlist profile sections
+- Concert ticket stub profile sections
+- Follow / unfollow users
+- Activity feed
+- Find users page
+- Admin panel with ban/unban and account deletion
 
 ## Getting Started
 
 ### Prerequisites
 
 - Node.js 18+ installed
-- A Supabase account
-- A Spotify Developer account
+
+### Environment Variables
+
+Create a `.env.local` file in the project root with the following keys:
+
+```
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+NEXT_PUBLIC_SPOTIFY_CLIENT_ID=
+SPOTIFY_CLIENT_SECRET=
+```
 
 ### Installation
 
 Clone the repository:
-Install dependencies
+
 ```terminal
-git clone https://github.com/yourusername/SoundBored.git
+git clone https://github.com/cdandeneau/Soundbored.git
 cd SoundBored
 ```
 
 Install dependencies:
+
 ```terminal
 npm install
 ```
-Create a local environment file:
-```terminal
-cp .env.example .env.local
-```
-Then add your Supabase and Spotify credentials to .env.local.
+
 Start the development server:
+
 ```terminal
 npm run dev
 ```
-Open http://localhost:3000
- in your browser.
 
+Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+> `npm` is recommended. `yarn` and `pnpm` will also work.
