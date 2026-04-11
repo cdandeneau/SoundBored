@@ -1,7 +1,12 @@
+
+// VinylPlayer component: renders a customizable vinyl or CD player UI with Spotify integration.
+// Allows users to pick tracks, customize colors, and play previews using the Spotify IFrame API.
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
 
+
+// Represents a track that can be played in the vinyl/CD player
 type VinylTrack = {
   spotify_track_id: string;
   track_name: string;
@@ -10,6 +15,8 @@ type VinylTrack = {
   preview_url?: string | null;
 };
 
+
+// Color palette for the player UI
 type PlayerColors = {
   body: string;
   bodyshadow: string;
@@ -19,6 +26,7 @@ type PlayerColors = {
   buttonBorder: string;
 };
 
+// Default color scheme for vinyl player
 const DEFAULT_COLORS: PlayerColors = {
   body: "#d52f31",
   bodyshadow: "#be272a",
@@ -28,6 +36,7 @@ const DEFAULT_COLORS: PlayerColors = {
   buttonBorder: "#be272a",
 };
 
+// Default color scheme for CD player
 const CD_DEFAULT_COLORS: PlayerColors = {
   body: "#e8e4e0",
   bodyshadow: "#c8c4c0",
@@ -37,6 +46,8 @@ const CD_DEFAULT_COLORS: PlayerColors = {
   buttonBorder: "#555555",
 };
 
+
+// Props for the VinylPlayer component
 type Props = {
   title: string;
   track: VinylTrack | null;
@@ -49,6 +60,7 @@ type Props = {
   onUpdateColors?: (colors: PlayerColors) => void;
 };
 
+// Main component function
 export default function VinylPlayer({
   title,
   track,
@@ -60,25 +72,31 @@ export default function VinylPlayer({
   onSelectTrack,
   onUpdateColors,
 }: Props) {
+
+  // Merge default and custom colors
   const defaults = variant === "cd" ? CD_DEFAULT_COLORS : DEFAULT_COLORS;
   const colors = { ...defaults, ...colorsProp };
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [isSpinning, setIsSpinning] = useState(false);
-  const [speed, setSpeed] = useState(0.7);
-  const [searching, setSearching] = useState(false);
-  const [showColors, setShowColors] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<VinylTrack[]>([]);
-  const [searchLoading, setSearchLoading] = useState(false);
 
+  // Player state
+  const [isPlaying, setIsPlaying] = useState(false); // Is the track currently playing
+  const [isSpinning, setIsSpinning] = useState(false); // Is the vinyl/CD spinning (for animation)
+  const [speed, setSpeed] = useState(0.7); // Animation speed
+  const [searching, setSearching] = useState(false); // Show track search UI
+  const [showColors, setShowColors] = useState(false); // Show color customizer
+  const [searchQuery, setSearchQuery] = useState(""); // Track search input
+  const [searchResults, setSearchResults] = useState<VinylTrack[]>([]); // Track search results
+  const [searchLoading, setSearchLoading] = useState(false); // Track search loading state
+
+  // Refs for Spotify IFrame API and current track
   const embedRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<{ togglePlay: () => void; loadUri: (uri: string) => void } | null>(null);
   const apiReadyRef = useRef(false);
   const trackIdRef = useRef(track?.spotify_track_id);
 
-  // Keep ref in sync
+  // Keep trackIdRef in sync with current track
   trackIdRef.current = track?.spotify_track_id;
 
+  // Create the Spotify embed controller for a given track
   const createEmbed = useCallback((trackId: string) => {
     if (!embedRef.current) return;
     const win = window as unknown as Record<string, unknown>;
@@ -101,7 +119,7 @@ export default function VinylPlayer({
     );
   }, []);
 
-  // Load the Spotify IFrame API script once
+  // Load the Spotify IFrame API script once on mount
   useEffect(() => {
     const win = window as unknown as Record<string, unknown>;
     if (win.SpotifyIframeApi) {
@@ -131,7 +149,7 @@ export default function VinylPlayer({
     document.body.appendChild(script);
   }, [createEmbed]);
 
-  // Update embed when track changes
+  // Update embed when the track changes
   useEffect(() => {
     if (!apiReadyRef.current || !track) return;
     if (controllerRef.current) {
@@ -142,6 +160,7 @@ export default function VinylPlayer({
     setIsPlaying(false);
   }, [track?.spotify_track_id, createEmbed]);
 
+  // Toggle play/pause for the current track
   function togglePlay() {
     if (controllerRef.current) {
       controllerRef.current.togglePlay();
@@ -149,6 +168,7 @@ export default function VinylPlayer({
     }
   }
 
+  // Search for tracks using the Spotify search API route
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault();
     if (!searchQuery.trim()) return;
@@ -165,6 +185,7 @@ export default function VinylPlayer({
     setSearchLoading(false);
   }
 
+  // Select a track from search results
   function selectTrack(t: VinylTrack) {
     onSelectTrack?.(t);
     setSearching(false);
@@ -172,14 +193,18 @@ export default function VinylPlayer({
     setSearchResults([]);
   }
 
+  // Update a color in the player palette
   function updateColor(key: keyof PlayerColors, value: string) {
     onUpdateColors?.({ ...colors, [key]: value });
   }
 
+  // UI helpers
   const isVinyl = variant === "vinyl";
   const shouldSpin = isSpinning || isPlaying;
+  // Only show customization controls if the user owns the profile and can customize
   const showCustomizeControls = isOwnProfile && canCustomize;
 
+  // Hide customization UIs when not allowed
   useEffect(() => {
     if (!showCustomizeControls) {
       setShowColors(false);
