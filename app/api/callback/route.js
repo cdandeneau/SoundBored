@@ -1,3 +1,21 @@
+/**
+ * GET /api/callback
+ *
+ * Spotify OAuth callback handler. Called by Spotify after the user
+ * authorizes access via /api/login.
+ *
+ * Flow:
+ *  1. Receive the `code` query param from Spotify's redirect
+ *  2. Exchange the code for an access token (Authorization Code grant)
+ *  3. Fetch the user's top 5 tracks from Spotify using that token
+ *  4. Save those tracks to the `saved_tracks` table in Supabase
+ *  5. Redirect to /feed?status=success (or /feed?status=error on failure)
+ *
+ * Credentials used:
+ *  - SPOTIFY_CLIENT_ID / SPOTIFY_CLIENT_SECRET — Base64-encoded in the Authorization header
+ *  - SPOTIFY_REDIRECT_URI — must match the URI registered in the Spotify developer dashboard
+ *  - SUPABASE_SERVICE_ROLE_KEY — used by supabaseServer to write without RLS restrictions
+ */
 import { NextResponse } from 'next/server';
 import { supabaseServer } from '@/utils/supabase/supabaseServer';
 

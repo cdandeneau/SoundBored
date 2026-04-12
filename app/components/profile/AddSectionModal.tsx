@@ -1,5 +1,21 @@
 "use client";
 
+/**
+ * AddSectionModal
+ *
+ * Full-screen overlay that lets the profile owner pick a new section type
+ * to add to their profile grid.
+ *
+ * Props:
+ *  existingTypes — array of section type strings already on the profile,
+ *                  used to disable options for sections marked `unique: true`
+ *  onAdd         — called with (type, label) when the user picks a section
+ *  onClose       — called when the user dismisses the modal (backdrop click or ✕)
+ *
+ * Unique sections (e.g. recent-ratings, favorite-tracks) can only appear once.
+ * Non-unique sections (vinyl, text, custom-playlist, etc.) can be added multiple times.
+ */
+
 const SECTION_TYPES = [
   {
     type: "recent-ratings",

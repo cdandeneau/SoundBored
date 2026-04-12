@@ -63,13 +63,23 @@ type TrendingTrack = {
 
 
 
+/**
+ * Converts an ISO timestamp to a human-readable relative string
+ * e.g. "3 hours ago", "yesterday", "2 weeks ago".
+ *
+ * Uses Intl.RelativeTimeFormat with numeric:"auto" which produces "yesterday"
+ * instead of "1 day ago" where applicable. Falls back to "just now" for
+ * timestamps less than a minute in the past.
+ */
 function formatTimeAgo(iso: string) {
   const now = new Date().getTime();
   const then = new Date(iso).getTime();
+  // negative = past, positive = future
   const diffSeconds = Math.round((then - now) / 1000);
 
   const formatter = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
 
+  // Ordered from largest unit to smallest — first match wins
   const ranges = [
     { unit: "year", seconds: 60 * 60 * 24 * 365 },
     { unit: "month", seconds: 60 * 60 * 24 * 30 },
@@ -169,13 +179,16 @@ export default function FeedPage() {
       return;
     }
 
+    // Set of profile IDs the current user is already following — used for O(1) lookup
     const followingSet = new Set(
       (myFollowRows || []).map((row) => row.following_id)
     );
 
+    // Build a map of { profileId → total follower count } by counting how many
+    // rows in the follows table point to each candidate profile.
     const followerCountMap = new Map<string, number>();
     for (const id of ids) {
-      followerCountMap.set(id, 0);
+      followerCountMap.set(id, 0); // initialize each profile at 0
     }
     for (const row of followerRows || []) {
       followerCountMap.set(
@@ -249,6 +262,8 @@ export default function FeedPage() {
       if (weekRatingsError) {
         setMessage(weekRatingsError.message);
       } else {
+        // Group the last 500 ratings by track, accumulating a count and sum
+        // so we can compute the average and sort by popularity.
         const grouped = new Map<
           string,
           {
@@ -279,6 +294,7 @@ export default function FeedPage() {
           }
         }
 
+        // Sort: most-rated tracks first; break ties by average rating
         const topTracks = Array.from(grouped.values())
           .map((track) => ({
             spotify_track_id: track.spotify_track_id,
@@ -295,7 +311,7 @@ export default function FeedPage() {
             }
             return b.averageRating - a.averageRating;
           })
-          .slice(0, 5);
+          .slice(0, 5); // Only show the top 5 trending tracks
 
         setTrendingTracks(topTracks);
       }
@@ -629,6 +645,7 @@ export default function FeedPage() {
         ) : (
           <section className="space-y-4">
             {feedItems.map((item) => {
+              // Validate the stored accent color before using it; fall back to default green
               const accentColor = /^#[0-9a-fA-F]{6}$/.test(item.profile?.accent_text_color || "")
                 ? (item.profile?.accent_text_color as string)
                 : "#22c55e";

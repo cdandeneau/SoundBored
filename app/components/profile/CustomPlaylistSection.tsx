@@ -1,5 +1,17 @@
 "use client";
 
+/**
+ * CustomPlaylistSection
+ *
+ * A profile grid section that displays a user-curated list of Spotify tracks.
+ * In view mode it shows the track list with album art and a "Spotify" link per track.
+ * In edit/customize mode (isOwnProfile && canCustomize) additional controls appear:
+ *  - ✎ title editor — inline input to rename the section
+ *  - "Add Song" button — opens a Spotify search bar to find and append tracks
+ *  - ✕ remove buttons — deletes individual tracks from the list
+ *
+ * Track search proxies through /api/spotify/search so credentials stay server-side.
+ */
 import { useEffect, useState } from "react";
 
 type PlaylistTrack = {

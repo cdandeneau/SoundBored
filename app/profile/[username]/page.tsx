@@ -98,10 +98,13 @@ type SectionTheme = {
   innerBgOpacity: number;
 };
 
+/** Clamps opacity to [0.1, 1] — prevents fully invisible card backgrounds */
 function clampOpacity(value: number): number {
   return Math.max(0.1, Math.min(1, value));
 }
 
+/** Converts a 6-digit hex color to an rgba() string with the given alpha.
+ *  Falls back to DEFAULT_CARD_BG_COLOR if the hex is malformed. */
 function hexToRgba(hex: string, alpha: number): string {
   const safeHex = /^#[0-9a-fA-F]{6}$/.test(hex) ? hex : DEFAULT_CARD_BG_COLOR;
   const normalized = safeHex.replace("#", "");
@@ -111,10 +114,13 @@ function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${clampOpacity(alpha)})`;
 }
 
+/** Clamps alpha to [0, 1] for pattern overlays (allows fully transparent) */
 function clampAlpha(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
 
+/** Same as hexToRgba but falls back to DEFAULT_PROFILE_PATTERN_COLOR.
+ *  Used for background pattern overlays where full transparency is allowed. */
 function hexToRgbaAlpha(hex: string, alpha: number): string {
   const safeHex = /^#[0-9a-fA-F]{6}$/.test(hex) ? hex : DEFAULT_PROFILE_PATTERN_COLOR;
   const normalized = safeHex.replace("#", "");
@@ -124,6 +130,12 @@ function hexToRgbaAlpha(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${clampAlpha(alpha)})`;
 }
 
+/**
+ * Returns a React.CSSProperties object with backgroundImage / backgroundSize
+ * that renders the chosen decorative pattern over the profile card.
+ * The "waves" pattern uses an inline SVG data-URI because CSS gradients alone
+ * cannot draw curved wave shapes.
+ */
 function getProfileCardPatternStyle(
   pattern: ProfileCardPattern,
   color: string,
@@ -169,6 +181,13 @@ function getProfileCardPatternStyle(
   return {};
 }
 
+/**
+ * Estimates the number of grid rows a list section needs to fit all its items
+ * without a scrollbar. Called when the user clicks "Auto-fit" in edit mode.
+ *
+ * The calculation converts pixel heights to grid row units using the formula:
+ *   rows = ceil(totalPx / (GRID_ROW_HEIGHT + GRID_MARGIN_Y)) + 1 safety row
+ */
 function estimateSnugRows(itemCount: number, extraPx = 0): number {
   const safeCount = Math.max(0, itemCount);
   const panelPaddingPx = 40; // p-5 top+bottom
@@ -194,7 +213,16 @@ const DEFAULT_LAYOUT: LayoutSection[] = [
   { id: "favorite-albums", type: "favorite-albums", title: "Favorite Albums", x: 8, y: 0, w: 4, h: 28 },
 ];
 
-/** Convert old width/position layouts to x/y/w/h format */
+/**
+ * Migrates older saved layout formats to the current x/y/w/h grid format.
+ *
+ * Two legacy formats exist:
+ *  1. width/position format — sections had a "full"/"half"/"third" width string
+ *     and a numeric position. Converted by mapping widths to column counts and
+ *     placing sections left-to-right, wrapping when the row is full.
+ *  2. Old 6-column format — sections used a 6-column grid (max x+w ≤ 6).
+ *     Doubled by multiplying x, y, w, h by 2 to fit the current 12-column grid.
+ */
 function migrateLayout(sections: LayoutSection[]): LayoutSection[] {
   if (sections.length === 0) return sections;
 
@@ -232,6 +260,8 @@ function migrateLayout(sections: LayoutSection[]): LayoutSection[] {
   return sections;
 }
 
+/** Returns the default grid dimensions for a newly added section type.
+ *  Taller defaults are given to sections that display lists (ratings, tracks). */
 function getDefaultSectionSize(type: string): { w: number; h: number } {
   switch (type) {
     case "text":
@@ -259,6 +289,15 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
+/**
+ * Computes an appropriate grid size for a text section based on its content.
+ * Used by the "Auto-fit" button so short notes get a compact box while
+ * long paragraphs get a wider, taller card.
+ *
+ * The width is chosen by character count + line count heuristics.
+ * The height estimates how many lines the text will wrap to at the chosen width,
+ * then converts wrapped lines to grid row units.
+ */
 function getDynamicTextSectionSize(title: string, content: string): { w: number; h: number } {
   const safeTitle = (title || "").trim();
   const safeContent = (content || "").trim();

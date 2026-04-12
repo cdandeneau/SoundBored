@@ -1,4 +1,11 @@
-﻿import Link from 'next/link';
+﻿/**
+ * Profile Index Page (/profile)
+ *
+ * Catch-all shown when someone navigates to /profile without a username.
+ * Real user profiles live at /profile/[username].
+ * This page just shows a brief message and a link back to the dashboard.
+ */
+import Link from 'next/link';
 
 export default function ProfileIndexPage() {
   return (

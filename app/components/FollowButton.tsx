@@ -1,5 +1,16 @@
 'use client';
 
+/**
+ * FollowButton (app/components)
+ *
+ * Reusable follow/unfollow toggle button used on the profile page.
+ * Uses an optimistic UI update — the displayed state flips immediately
+ * and reverts only if the Supabase write fails.
+ *
+ * Note: there is also a near-identical copy at app/profile/followbutton.tsx
+ * which was the original version. This one in app/components/ is the canonical
+ * version. Both are functionally the same.
+ */
 import { useState } from 'react';
 import { supabase } from '@/utils/supabase/supabaseClient';
 import { getCurrentUserSafe } from '@/utils/supabase/auth';

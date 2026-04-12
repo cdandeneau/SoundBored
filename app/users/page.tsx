@@ -144,14 +144,17 @@ export default function UsersPage() {
       return;
     }
 
+    // Set of profile IDs the current user already follows — O(1) lookup per profile
     const followingSet = new Set(
       (followsData || []).map((row) => row.following_id)
     );
 
+    // Count total followers for each result profile by tallying rows in the
+    // follows table that point to them (not just from the current user).
     const followerCountMap = new Map<string, number>();
 
     for (const id of ids) {
-      followerCountMap.set(id, 0);
+      followerCountMap.set(id, 0); // initialize at 0 so every profile has an entry
     }
 
     for (const row of followerRows || []) {
@@ -161,6 +164,7 @@ export default function UsersPage() {
       );
     }
 
+    // Merge profile data with computed follow metadata
     const merged: SearchResult[] = profiles.map((profile) => ({
       ...profile,
       followerCount: followerCountMap.get(profile.id) || 0,
@@ -199,6 +203,7 @@ export default function UsersPage() {
         return;
       }
 
+      // Update local state optimistically; Math.max(0) guards against going negative
       setResults((prev) =>
         prev.map((profile) =>
           profile.id === profileId

@@ -1,5 +1,23 @@
 "use client";
 
+/**
+ * Profile Ratings Page (/profile/[username]/ratings)
+ *
+ * Full listing of all song ratings for a given user profile.
+ * Shows a summary header (total ratings, average score, # with written reviews,
+ * last-reviewed date) and then a full scrollable list of each rating.
+ *
+ * Each rating entry shows:
+ *  - Album art thumbnail
+ *  - Track name, artist, album
+ *  - Note-symbol rating + numeric score + date
+ *  - Written review (or "No written review" message)
+ *  - "Listen on Spotify" link (for any viewer)
+ *  - Edit / Delete controls (profile owner only)
+ *
+ * The accent color is read from the profile's accent_text_color column and
+ * applied to artist names, scores, and reviews.
+ */
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";

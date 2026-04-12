@@ -1,5 +1,16 @@
 'use client';
 
+/**
+ * FollowButton (app/profile)
+ *
+ * Original follow/unfollow toggle button — kept for backwards compatibility.
+ * The canonical version is now app/components/FollowButton.tsx.
+ * Both files are functionally identical.
+ *
+ * Uses an optimistic UI update: the displayed state flips immediately and
+ * reverts if the Supabase write fails. Calls router.refresh() after a
+ * successful toggle so Next.js re-fetches server-side follower counts.
+ */
 import { useState } from 'react';
 import { supabase } from '@/utils/supabase/supabaseClient';
 import { getCurrentUserSafe } from '@/utils/supabase/auth';

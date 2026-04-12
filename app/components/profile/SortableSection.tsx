@@ -1,5 +1,18 @@
 "use client";
 
+/**
+ * SortableSection
+ *
+ * A drag-and-drop wrapper built on @dnd-kit/sortable.
+ * Wraps any profile section child in a grid column that:
+ *  - Supports drag-to-reorder via the ⠿ handle (edit mode only)
+ *  - Shows resize buttons (⅓ / ½ / Full) to change column width
+ *  - Shows a ✕ remove button to delete the section
+ *
+ * NOTE: This component is a legacy artifact from when profiles used @dnd-kit.
+ * The profile page now uses react-grid-layout for its section grid, so
+ * SortableSection may no longer be actively used in the main layout.
+ */
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { ReactNode } from "react";

@@ -1,3 +1,11 @@
+/**
+ * Home / Landing Page (/)
+ *
+ * Public landing page shown to unauthenticated visitors.
+ * Contains the app name, a one-line pitch, and Log In / Sign Up buttons.
+ * No auth check is done here — authenticated users can still visit this page
+ * and use the nav links to log in or sign up again.
+ */
 import Link from "next/link";
 
 export default function Home() {

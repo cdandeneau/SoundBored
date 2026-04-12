@@ -1,5 +1,20 @@
 "use client";
 
+/**
+ * ConcertTicketStubSection
+ *
+ * Renders a skeuomorphic concert ticket stub on the profile.
+ * The stub has three visual columns:
+ *  - Left stub   — event code (first 5 chars of tour name), section, seat, date
+ *  - Main body   — diagonal stripe background with artist, tour, album, venue, city, date
+ *  - Right stub  — a barcode rendered via CSS repeating-linear-gradient stripes
+ *
+ * In edit mode (isOwnProfile && canCustomize) shows an inline form to fill in
+ * all ticket fields plus two border color pickers (primary and secondary).
+ *
+ * Year display: if `year` is blank, it is auto-derived from the `date` field
+ * using parseYear() to extract the UTC year.
+ */
 import { useMemo, useState } from "react";
 
 type TicketStubData = {
@@ -246,6 +261,8 @@ export default function ConcertTicketStubSection({
               style={{ borderColor: displayBorderPrimary }}
             >
               <div className="h-full rounded border bg-white p-1" style={{ borderColor: displayBorderSecondary }}>
+                {/* Fake barcode — horizontal stripes of varying widths created
+                    with repeating-linear-gradient to mimic a real barcode pattern */}
                 <div
                   className="h-full w-full"
                   style={{

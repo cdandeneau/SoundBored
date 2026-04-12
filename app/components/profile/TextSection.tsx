@@ -1,5 +1,21 @@
 "use client";
 
+/**
+ * TextSection
+ *
+ * A freeform text block that appears as a profile grid section.
+ * In view mode it renders the title and content as-is (whitespace preserved).
+ * In edit mode (isOwnProfile is true and the ✎ Edit button is clicked) it
+ * shows an inline form where the user can change both the title and the content.
+ *
+ * Props:
+ *  title                — section heading
+ *  content              — body text (supports newlines via whitespace-pre-wrap)
+ *  isOwnProfile         — shows the Edit button when true
+ *  outerBackgroundColor — CSS background for the card wrapper
+ *  accentTextColor      — text color for the body content
+ *  onSave               — called with (title, content) when the user saves edits
+ */
 import { useState } from "react";
 
 type Props = {
