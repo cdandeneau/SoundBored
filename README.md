@@ -18,7 +18,7 @@ A full-stack social music web application where users can sign up, log in, rate 
 - Profile stickers (built-in and custom uploads)
 - Song ratings with reviews
 - Favorite tracks and albums (via Spotify search)
-- Vinyl and CD player profile sections
+- Vinyl, Strollman and CD player profile sections
 - Custom playlist profile sections
 - Concert ticket stub profile sections
 - Follow / unfollow users
