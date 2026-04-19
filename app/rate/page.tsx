@@ -20,7 +20,6 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../utils/supabase/supabaseClient";
 import { getCurrentUserSafe } from "../../utils/supabase/auth";
-import TopNav from "../../components/TopNav";
 import NoteRating from "../components/NoteRating";
 import MusicReviewCard from "../components/MusicReviewCard";
 
@@ -177,16 +176,8 @@ export default function RateSongPage() {
   return (
     <main className="min-h-screen px-6 py-12 text-white">
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-8">
-        <div className="flex items-center justify-between">
+        <div>
           <h1 className="text-4xl font-bold">Rate a Song</h1>
-
-          <TopNav
-            showMyProfile
-            myProfileUsername={myUsername}
-            showFeed
-            showUsers
-            showRate={false}
-          />
         </div>
 
         <section className="rounded-2xl bg-zinc-900 p-8 shadow-lg">
@@ -289,28 +280,25 @@ export default function RateSongPage() {
             )}
 
             <div>
-              <label className="mb-2 block text-sm font-medium text-zinc-300">
+              <label className="mb-4 block text-sm font-medium text-zinc-300">
                 Rating
               </label>
-              <select
-                value={rating}
-                onChange={(e) => setRating(e.target.value)}
-                className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-3 text-white outline-none focus:ring-2 focus:ring-green-500"
-              >
-                {ratingOptions.map((value) => (
-                  <option key={value} value={value}>
-                    {value} — {formatNotesText(value)}
-                  </option>
+              <div className="flex justify-center gap-4">
+                {[1, 2, 3, 4, 5].map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setRating(String(value))}
+                    className={`text-6xl transition ${
+                      Number(rating) >= value
+                        ? "text-green-500"
+                        : "text-zinc-600 hover:text-zinc-500"
+                    }`}
+                  >
+                    ♪
+                  </button>
                 ))}
-              </select>
-            </div>
-
-            <div className="rounded-xl bg-zinc-800/60 p-4">
-              <p className="mb-2 text-sm text-zinc-400">Preview</p>
-              <p className="text-2xl font-semibold text-green-400">
-                <NoteRating rating={Number(rating)} />
-              </p>
-              <p className="mt-1 text-sm text-zinc-400">{Number(rating)} / 5</p>
+              </div>
             </div>
 
             {(selectedTrack || review.trim()) && (

@@ -1,5 +1,7 @@
 "use client";
 
+import { createPortal } from "react-dom";
+
 /**
  * AddSectionModal
  *
@@ -93,9 +95,9 @@ export default function AddSectionModal({
   onAdd,
   onClose,
 }: Props) {
-  return (
+  const modal = (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+      className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/70 p-4"
       onClick={onClose}
     >
       <div
@@ -151,4 +153,6 @@ export default function AddSectionModal({
       </div>
     </div>
   );
+
+  return createPortal(modal, document.body);
 }

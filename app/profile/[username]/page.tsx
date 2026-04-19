@@ -27,6 +27,7 @@
 
 import Link from "next/link";
 import { useEffect, useState, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useParams, useRouter } from "next/navigation";
 import {
   ResponsiveGridLayout,
@@ -38,7 +39,6 @@ import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 import { supabase } from "../../../utils/supabase/supabaseClient";
 import { getCurrentUserSafe } from "../../../utils/supabase/auth";
-import TopNav from "../../../components/TopNav";
 import NoteRating from "../../components/NoteRating";
 import VinylPlayer from "../../components/profile/VinylPlayer";
 import MusicNotesLoader, { cacheNoteColor } from "../../components/MusicNotesLoader";
@@ -86,8 +86,8 @@ const DEFAULT_INNER_BG_OPACITY = 0.6;
 const DEFAULT_PROFILE_PATTERN = "none" as const;
 const DEFAULT_PROFILE_PATTERN_COLOR = "#22c55e";
 const DEFAULT_PROFILE_PATTERN_OPACITY = 0.2;
-const DEFAULT_PROFILE_BOX_BG_COLOR = "#18181b";
-const DEFAULT_PROFILE_BOX_BG_OPACITY = 0.95;
+const DEFAULT_PROFILE_BOX_BG_COLOR = "#27272a";
+const DEFAULT_PROFILE_BOX_BG_OPACITY = 0.6;
 
 type ProfileCardPattern = "none" | "dots" | "grid" | "diagonal" | "waves" | "crosshatch";
 
@@ -447,6 +447,8 @@ export default function ProfilePage() {
   const [followingCount, setFollowingCount] = useState(0);
   const [followers, setFollowers] = useState<FollowProfile[]>([]);
   const [followingUsers, setFollowingUsers] = useState<FollowProfile[]>([]);
+  const [showFollowers, setShowFollowers] = useState(false);
+  const [showFollowing, setShowFollowing] = useState(false);
 
   const [bioDraft, setBioDraft] = useState("");
   const [bioMessage, setBioMessage] = useState("");
@@ -522,6 +524,10 @@ export default function ProfilePage() {
   const [showAddSection, setShowAddSection] = useState(false);
   const [isAutoFitting, setIsAutoFitting] = useState(false);
   const [viewportWidth, setViewportWidth] = useState(1200);
+  const [panelX, setPanelX] = useState(20);
+  const [panelY, setPanelY] = useState(100);
+  const [isDraggingPanel, setIsDraggingPanel] = useState(false);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const canCustomizeSections = isOwnProfile && isEditMode;
 
   useEffect(() => {
@@ -592,7 +598,9 @@ export default function ProfilePage() {
       } else if (section.type === "favorite-albums") {
         targetH = estimateSnugRows(favoriteAlbums.length, showAlbumForm ? 320 : 0);
       } else if (section.type === "recent-ratings") {
-        targetH = estimateSnugRows(recentRatings.length, (editingRatingId ? 120 : 0) + 24);
+        // Extra per-item height for MusicReviewCard rendered inside each rating
+        const reviewCardExtra = recentRatings.length * 80;
+        targetH = estimateSnugRows(recentRatings.length, (editingRatingId ? 120 : 0) + 24 + reviewCardExtra);
       } else if (section.type === "custom-playlist") {
         const tracks = (section.data?.tracks as unknown[] | undefined) || [];
         targetH = estimateSnugRows(tracks.length, 0);
@@ -897,6 +905,28 @@ export default function ProfilePage() {
     loadProfile();
   }, [username]);
 
+  useEffect(() => {
+    function handleMouseMove(e: MouseEvent) {
+      if (!isDraggingPanel) return;
+      setPanelX(e.clientX - dragOffset.x);
+      setPanelY(e.clientY - dragOffset.y);
+    }
+
+    function handleMouseUp() {
+      setIsDraggingPanel(false);
+    }
+
+    if (isDraggingPanel) {
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mouseup", handleMouseUp);
+    }
+
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isDraggingPanel, dragOffset]);
+
   async function handleLogout() {
     await supabase.auth.signOut();
     router.push("/");
@@ -1002,6 +1032,54 @@ export default function ProfilePage() {
 
     // Profile is gone — redirect to the admin panel
     router.push("/admin");
+  }
+
+  /**
+   * Admin: toggle the admin status of the profile being viewed.
+   * Calls /api/admin/makeadmin with the current session token.
+   * The server verifies admin status before taking action.
+   */
+  async function handleAdminToggleAdmin() {
+    if (!profile || !isCurrentUserAdmin) return;
+
+    setAdminActionMessage("");
+    setAdminActionBusy(true);
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const token = session?.access_token;
+
+    if (!token) {
+      setAdminActionMessage("Session expired. Please log in again.");
+      setAdminActionBusy(false);
+      return;
+    }
+
+    const res = await fetch("/api/admin/makeadmin", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ userId: profile.id }),
+    });
+
+    const json = await res.json();
+    setAdminActionBusy(false);
+
+    if (!res.ok) {
+      setAdminActionMessage(json.error || "Action failed.");
+      return;
+    }
+
+    // Update local profile state so the UI reflects the new admin status immediately
+    setProfile((prev) => (prev ? { ...prev, is_admin: json.is_admin } : prev));
+    setAdminActionMessage(
+      json.is_admin
+        ? `@${profile.username} is now an admin.`
+        : `@${profile.username} is no longer an admin.`
+    );
   }
 
   /**
@@ -2125,7 +2203,7 @@ export default function ProfilePage() {
 
   function renderRecentRatings(theme: SectionTheme) {
     return (
-      <section className="h-full rounded-2xl p-5 shadow-lg" style={{ backgroundColor: hexToRgba(theme.outerBgColor, theme.outerBgOpacity) }}>
+      <section className="rounded-2xl p-5 shadow-lg" style={{ backgroundColor: hexToRgba(theme.outerBgColor, theme.outerBgOpacity) }}>
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-bold" style={{ color: theme.accentTextColor }}>Recent Ratings</h2>
           <div className="flex gap-2">
@@ -2144,7 +2222,7 @@ export default function ProfilePage() {
             <div className="rounded-xl border border-dashed border-zinc-700 p-4 text-center text-sm text-zinc-400">No song ratings yet.</div>
           ) : (
             recentRatings.map((rating) => (
-              <div key={rating.id} className="rounded-lg p-3 min-h-[7rem]" style={{ backgroundColor: hexToRgba(theme.innerBgColor, theme.innerBgOpacity) }}>
+              <div key={rating.id} className="rounded-lg p-3 flex flex-col" style={{ backgroundColor: hexToRgba(theme.innerBgColor, theme.innerBgOpacity) }}>
                 {editingRatingId === rating.id ? (
                   <div className="space-y-2">
                     <div className="flex items-center gap-3">
@@ -2392,59 +2470,34 @@ export default function ProfilePage() {
     );
   }
 
+  function handlePanelMouseDown(e: React.MouseEvent<HTMLDivElement>) {
+    if ((e.target as HTMLElement).closest("button, input, textarea, select")) return;
+    setIsDraggingPanel(true);
+    setDragOffset({
+      x: e.clientX - panelX,
+      y: e.clientY - panelY,
+    });
+  }
+
   return (
     <main className="min-h-screen overflow-x-hidden px-6 py-8 text-white">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
-
-        {/* ── Top nav row ── sits above the profile card, right-aligned in the black space */}
-        <div className="rounded-2xl border border-white/8 bg-black/20 px-3 py-3 backdrop-blur-sm">
-        <div className="flex flex-wrap items-center justify-end gap-3">
-          {isOwnProfile ? (
-            <TopNav
-              showMyProfile={false}
-              myProfileUsername={currentUsername}
-              showFeed
-              showUsers
-              showRate
-              showLogout
-              onLogout={handleLogout}
-              showAdmin={isCurrentUserAdmin}
-              isAdmin={isCurrentUserAdmin}
-            />
-          ) : (
-            <>
-              <TopNav
-                showMyProfile
-                myProfileUsername={currentUsername}
-                showFeed
-                showUsers
-                showRate
-                showProfile={false}
-                showAdmin={isCurrentUserAdmin}
-                isAdmin={isCurrentUserAdmin}
-              />
-              {currentUserId && (
-                <button
-                  onClick={handleToggleFollow}
-                  disabled={followBusy}
-                  className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
-                    isFollowing
-                      ? "border border-zinc-700 text-zinc-300 hover:bg-zinc-800"
-                      : "bg-green-500 text-black hover:bg-green-600"
-                  } disabled:opacity-60`}
-                >
-                  {followBusy ? "Working..." : isFollowing ? "Following" : "Follow"}
-                </button>
-              )}
-            </>
-          )}
-        </div>
-        </div>
+      <div className="flex w-full flex-col gap-6">
 
         {/* Admin action strip — only shown to admins viewing someone else's profile */}
         {isCurrentUserAdmin && !isOwnProfile && profile && (
           <div className="flex flex-wrap items-center gap-3 rounded-lg border border-blue-900 bg-blue-950/30 px-4 py-3">
             <span className="text-xs font-semibold uppercase tracking-wide text-blue-400">🛡️ Admin</span>
+            <button
+              onClick={handleAdminToggleAdmin}
+              disabled={adminActionBusy}
+              className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition disabled:opacity-60 ${
+                profile.is_admin
+                  ? "bg-blue-800 text-white hover:bg-blue-700"
+                  : "bg-purple-800 text-white hover:bg-purple-700"
+              }`}
+            >
+              {adminActionBusy ? "Working..." : profile.is_admin ? "Remove Admin" : "Make Admin"}
+            </button>
             <button
               onClick={handleAdminBanToggle}
               disabled={adminActionBusy}
@@ -2467,12 +2520,12 @@ export default function ProfilePage() {
           </div>
         )}
 
-        <div className="panel-surface relative overflow-hidden rounded-[28px] p-8 shadow-lg" style={{ backgroundColor: hexToRgba(profileBoxBgColor, profileBoxBgOpacity) }}>
-          <div className="pointer-events-none absolute inset-x-0 top-0 h-44 bg-gradient-to-r from-green-500/18 via-emerald-400/10 to-sky-500/14" />
-          <div className="pointer-events-none absolute -left-10 top-10 h-36 w-36 rounded-full bg-green-400/12 blur-3xl" />
-          <div className="pointer-events-none absolute right-0 top-0 h-40 w-40 rounded-full bg-sky-400/10 blur-3xl" />
+        <div className="panel-surface relative rounded-[28px] p-8 shadow-lg" style={{ backgroundColor: hexToRgba(profileBoxBgColor, profileBoxBgOpacity) }}>
           {isOwnProfile && (
             <div className="relative z-10 mb-6 flex items-center justify-end gap-2">
+              <div className="mr-auto inline-flex rounded-full border border-white/10 bg-zinc-800 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.24em] text-zinc-400">
+                SoundBored Profile
+              </div>
               {isEditMode && (
                 <button
                   onClick={() => setShowStickerToolbar((prev) => !prev)}
@@ -2504,9 +2557,23 @@ export default function ProfilePage() {
             </div>
           )}
 
-          {isOwnProfile && isEditMode && (
-            <>
-              <div className="absolute -left-[18.5rem] top-0 z-30 hidden h-full w-72 overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-950/95 p-3 shadow-xl backdrop-blur xl:block">
+          {isOwnProfile && isEditMode && createPortal(
+            (
+              <>
+                <div
+                  onMouseDown={handlePanelMouseDown}
+                  className="fixed z-[9999] w-96 rounded-xl border border-zinc-700 bg-zinc-950/95 p-3 shadow-xl backdrop-blur"
+                style={{
+                  left: `${panelX}px`,
+                  top: `${panelY}px`,
+                  cursor: isDraggingPanel ? "grabbing" : "grab",
+                  maxHeight: "90vh",
+                }}
+              >
+                <div className="flex items-center justify-between mb-3 pb-2 border-b border-zinc-700">
+                  <h3 className="text-sm font-semibold text-zinc-300">Customize</h3>
+                  <div className="text-xs text-zinc-500 cursor-grab active:cursor-grabbing">☰</div>
+                </div>
                 <div className="grid grid-cols-2 gap-2.5">
                   <button
                     onClick={() => setShowAddSection(true)}
@@ -2523,7 +2590,7 @@ export default function ProfilePage() {
                     {isAutoFitting ? "Fitting..." : "Auto-fit Boxes"}
                   </button>
 
-                  <div className="rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-2">
+                  <div className="border-t border-zinc-700 px-2.5 py-3">
                     <p className="mb-1 text-[11px] font-semibold text-zinc-300">Notes</p>
                     <p className="mb-2 text-[10px] text-zinc-500">Falling background notes</p>
                     <div className="flex items-center gap-2">
@@ -2546,7 +2613,7 @@ export default function ProfilePage() {
                     {noteColorMessage && <p className="mt-1 text-[11px] text-zinc-400">{noteColorMessage}</p>}
                   </div>
 
-                  <div className="rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-2">
+                  <div className="border-t border-zinc-700 px-2.5 py-3">
                     <p className="mb-1 text-[11px] font-semibold text-zinc-300">Accent Text</p>
                     <p className="mb-2 text-[10px] text-zinc-500">Board headings and rating accents</p>
                     <div className="flex items-center gap-2">
@@ -2569,7 +2636,7 @@ export default function ProfilePage() {
                     {accentTextMessage && <p className="mt-1 text-[11px] text-zinc-400">{accentTextMessage}</p>}
                   </div>
 
-                  <div className="col-span-2 rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-2">
+                  <div className="col-span-2 border-t border-zinc-700 px-2.5 py-3">
                     <p className="mb-1 text-[11px] font-semibold text-zinc-300">Profile Box & Pattern</p>
                     <p className="mb-2 text-[10px] text-zinc-500">Box color/opacity + top-card pattern (bio stays clean)</p>
                     <div className="space-y-2">
@@ -2655,171 +2722,167 @@ export default function ProfilePage() {
                     </div>
                     {profilePatternMessage && <p className="mt-1 text-[11px] text-zinc-400">{profilePatternMessage}</p>}
                   </div>
-                </div>
+
+                  <div className="col-span-2 border-t border-zinc-700 px-2.5 py-3">
+                    <p className="mb-1 text-[11px] font-semibold text-zinc-300">Box Styles</p>
+                    <p className="mb-2 text-[10px] text-zinc-500">Customize selected section or all sections</p>
+
+                    <div className="grid grid-cols-[84px_minmax(0,1fr)_46px] items-center gap-2">
+                      <label htmlFor="box-style-target" className="text-[11px] text-zinc-400">Target</label>
+                      <select
+                        id="box-style-target"
+                        value={styleTargetSectionId}
+                        onChange={(e) => {
+                          setStyleTargetSectionId(e.target.value);
+                          setBoxStyleMessage("");
+                        }}
+                        className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-white outline-none"
+                      >
+                        <option value="all">All Boxes</option>
+                        {layout.map((section) => (
+                          <option key={section.id} value={section.id}>{section.title}</option>
+                        ))}
+                      </select>
+                      <div className="flex justify-end">
+                        <input
+                          type="color"
+                          value={boxAccentDraft}
+                          onChange={(e) => {
+                            setBoxAccentDraft(e.target.value);
+                            setBoxStyleMessage("");
+                          }}
+                          className="h-7 w-7 cursor-pointer rounded border border-zinc-600 bg-transparent"
+                          title="Box accent color"
+                        />
+                      </div>
+
+                      <label className="text-[11px] text-zinc-400">Accent</label>
+                      <div className="h-px" />
+                      <span className="text-right text-xs text-zinc-500">&nbsp;</span>
+
+                      <label className="text-[11px] text-zinc-400">Outer Color</label>
+                      <div className="h-px" />
+                      <div className="flex justify-end">
+                        <input
+                          type="color"
+                          value={boxOuterBgColorDraft}
+                          onChange={(e) => {
+                            setBoxOuterBgColorDraft(e.target.value);
+                            setBoxStyleMessage("");
+                          }}
+                          className="h-7 w-7 cursor-pointer rounded border border-zinc-600 bg-transparent"
+                          title="Outer panel color"
+                        />
+                      </div>
+
+                      <label className="text-[11px] text-zinc-400">Outer Opacity</label>
+                      <input
+                        type="range"
+                        min={10}
+                        max={100}
+                        value={Math.round(boxOuterBgOpacityDraft * 100)}
+                        onChange={(e) => {
+                          setBoxOuterBgOpacityDraft(Number(e.target.value) / 100);
+                          setBoxStyleMessage("");
+                        }}
+                        title="Panel opacity"
+                      />
+                      <span className="text-right text-xs text-zinc-400">{Math.round(boxOuterBgOpacityDraft * 100)}%</span>
+
+                      <label className="text-[11px] text-zinc-400">Inner Color</label>
+                      <div className="h-px" />
+                      <div className="flex justify-end">
+                        <input
+                          type="color"
+                          value={boxInnerBgColorDraft}
+                          onChange={(e) => {
+                            setBoxInnerBgColorDraft(e.target.value);
+                            setBoxStyleMessage("");
+                          }}
+                          className="h-7 w-7 cursor-pointer rounded border border-zinc-600 bg-transparent"
+                          title="Inner card/button color"
+                        />
+                      </div>
+
+                      <label className="text-[11px] text-zinc-400">Inner Opacity</label>
+                      <input
+                        type="range"
+                        min={10}
+                        max={100}
+                        value={Math.round(boxInnerBgOpacityDraft * 100)}
+                        onChange={(e) => {
+                          setBoxInnerBgOpacityDraft(Number(e.target.value) / 100);
+                          setBoxStyleMessage("");
+                        }}
+                        title="Inner card/button opacity"
+                      />
+                      <span className="text-right text-xs text-zinc-400">{Math.round(boxInnerBgOpacityDraft * 100)}%</span>
+                    </div>
+
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      <button
+                        onClick={() => {
+                          if (styleTargetSectionId === "all") {
+                            applyBoxStyleToAllSections();
+                            return;
+                          }
+                          applyBoxStyleToSection(styleTargetSectionId);
+                        }}
+                        className="h-8 rounded border border-green-500 px-2 py-1 text-xs font-semibold text-green-300 hover:bg-green-500/10"
+                      >
+                        Apply Selected
+                      </button>
+                      <button
+                        onClick={applyBoxStyleToAllSections}
+                        className="h-8 rounded border border-zinc-600 px-2 py-1 text-xs font-semibold text-zinc-300 hover:bg-zinc-800"
+                      >
+                        Apply All
+                      </button>
+                    </div>
+                    <div className="mt-2 flex items-center gap-3">
+                      <span className="text-[11px] text-zinc-500">Preview</span>
+                      <div className="flex items-center gap-1">
+                        <span className="text-[11px] text-zinc-400">Outer</span>
+                        <div
+                          className="h-4 w-4 rounded border border-zinc-600"
+                          style={{ backgroundColor: hexToRgba(boxOuterBgColorDraft, boxOuterBgOpacityDraft) }}
+                          title="Outer panel preview"
+                        />
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="text-[11px] text-zinc-400">Inner</span>
+                        <div
+                          className="h-4 w-4 rounded border border-zinc-600"
+                          style={{ backgroundColor: hexToRgba(boxInnerBgColorDraft, boxInnerBgOpacityDraft) }}
+                          title="Inner card preview"
+                        />
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="text-[11px] text-zinc-400">Accent</span>
+                        <div
+                          className="h-4 w-4 rounded-full border border-zinc-600"
+                          style={{ backgroundColor: boxAccentDraft }}
+                          title="Accent preview"
+                        />
+                      </div>
+                    </div>
+                    {boxStyleMessage && <p className="mt-1 text-[11px] text-zinc-400">{boxStyleMessage}</p>}
+                  </div>
+              </div>
               </div>
 
-              <div className="absolute -right-[20.5rem] top-0 z-30 hidden h-full w-80 overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-950/95 p-3 shadow-xl backdrop-blur xl:block">
-                <div className="rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-2">
-                  <p className="mb-1 text-[11px] font-semibold text-zinc-300">Box Styles</p>
-                  <p className="mb-2 text-[10px] text-zinc-500">Customize selected section or all sections</p>
-
-                  <div className="grid grid-cols-[84px_minmax(0,1fr)_46px] items-center gap-2">
-                    <label htmlFor="box-style-target" className="text-[11px] text-zinc-400">Target</label>
-                    <select
-                      id="box-style-target"
-                      value={styleTargetSectionId}
-                      onChange={(e) => {
-                        setStyleTargetSectionId(e.target.value);
-                        setBoxStyleMessage("");
-                      }}
-                      className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-white outline-none"
-                    >
-                      <option value="all">All Boxes</option>
-                      {layout.map((section) => (
-                        <option key={section.id} value={section.id}>{section.title}</option>
-                      ))}
-                    </select>
-                    <div className="flex justify-end">
-                      <input
-                        type="color"
-                        value={boxAccentDraft}
-                        onChange={(e) => {
-                          setBoxAccentDraft(e.target.value);
-                          setBoxStyleMessage("");
-                        }}
-                        className="h-7 w-7 cursor-pointer rounded border border-zinc-600 bg-transparent"
-                        title="Box accent color"
-                      />
-                    </div>
-
-                    <label className="text-[11px] text-zinc-400">Accent</label>
-                    <div className="h-px" />
-                    <span className="text-right text-xs text-zinc-500">&nbsp;</span>
-
-                    <label className="text-[11px] text-zinc-400">Outer Color</label>
-                    <div className="h-px" />
-                    <div className="flex justify-end">
-                      <input
-                        type="color"
-                        value={boxOuterBgColorDraft}
-                        onChange={(e) => {
-                          setBoxOuterBgColorDraft(e.target.value);
-                          setBoxStyleMessage("");
-                        }}
-                        className="h-7 w-7 cursor-pointer rounded border border-zinc-600 bg-transparent"
-                        title="Outer panel color"
-                      />
-                    </div>
-
-                    <label className="text-[11px] text-zinc-400">Outer Opacity</label>
-                    <input
-                      type="range"
-                      min={10}
-                      max={100}
-                      value={Math.round(boxOuterBgOpacityDraft * 100)}
-                      onChange={(e) => {
-                        setBoxOuterBgOpacityDraft(Number(e.target.value) / 100);
-                        setBoxStyleMessage("");
-                      }}
-                      title="Panel opacity"
-                    />
-                    <span className="text-right text-xs text-zinc-400">{Math.round(boxOuterBgOpacityDraft * 100)}%</span>
-
-                    <label className="text-[11px] text-zinc-400">Inner Color</label>
-                    <div className="h-px" />
-                    <div className="flex justify-end">
-                      <input
-                        type="color"
-                        value={boxInnerBgColorDraft}
-                        onChange={(e) => {
-                          setBoxInnerBgColorDraft(e.target.value);
-                          setBoxStyleMessage("");
-                        }}
-                        className="h-7 w-7 cursor-pointer rounded border border-zinc-600 bg-transparent"
-                        title="Inner card/button color"
-                      />
-                    </div>
-
-                    <label className="text-[11px] text-zinc-400">Inner Opacity</label>
-                    <input
-                      type="range"
-                      min={10}
-                      max={100}
-                      value={Math.round(boxInnerBgOpacityDraft * 100)}
-                      onChange={(e) => {
-                        setBoxInnerBgOpacityDraft(Number(e.target.value) / 100);
-                        setBoxStyleMessage("");
-                      }}
-                      title="Inner card/button opacity"
-                    />
-                    <span className="text-right text-xs text-zinc-400">{Math.round(boxInnerBgOpacityDraft * 100)}%</span>
-                  </div>
-
-                  <div className="mt-2 grid grid-cols-2 gap-2">
-                    <button
-                      onClick={() => {
-                        if (styleTargetSectionId === "all") {
-                          applyBoxStyleToAllSections();
-                          return;
-                        }
-                        applyBoxStyleToSection(styleTargetSectionId);
-                      }}
-                      className="h-8 rounded border border-green-500 px-2 py-1 text-xs font-semibold text-green-300 hover:bg-green-500/10"
-                    >
-                      Apply Selected
-                    </button>
-                    <button
-                      onClick={applyBoxStyleToAllSections}
-                      className="h-8 rounded border border-zinc-600 px-2 py-1 text-xs font-semibold text-zinc-300 hover:bg-zinc-800"
-                    >
-                      Apply All
-                    </button>
-                  </div>
-                  <div className="mt-2 flex items-center gap-3">
-                    <span className="text-[11px] text-zinc-500">Preview</span>
-                    <div className="flex items-center gap-1">
-                      <span className="text-[11px] text-zinc-400">Outer</span>
-                      <div
-                        className="h-4 w-4 rounded border border-zinc-600"
-                        style={{ backgroundColor: hexToRgba(boxOuterBgColorDraft, boxOuterBgOpacityDraft) }}
-                        title="Outer panel preview"
-                      />
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <span className="text-[11px] text-zinc-400">Inner</span>
-                      <div
-                        className="h-4 w-4 rounded border border-zinc-600"
-                        style={{ backgroundColor: hexToRgba(boxInnerBgColorDraft, boxInnerBgOpacityDraft) }}
-                        title="Inner card preview"
-                      />
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <span className="text-[11px] text-zinc-400">Accent</span>
-                      <div
-                        className="h-4 w-4 rounded-full border border-zinc-600"
-                        style={{ backgroundColor: boxAccentDraft }}
-                        title="Accent preview"
-                      />
-                    </div>
-                  </div>
-                  {boxStyleMessage && <p className="mt-1 text-[11px] text-zinc-400">{boxStyleMessage}</p>}
-                </div>
-              </div>
-            </>
+              </>
+            ),
+            document.body
           )}
-          <div className="relative z-10 overflow-hidden rounded-[24px] border border-white/10 bg-black/18 px-6 py-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-sm">
+          <div className="relative z-10">
             {profileCardPattern !== "none" && (
               <div
-                className="pointer-events-none absolute inset-0 z-0"
-                style={getProfileCardPatternStyle(
-                  profileCardPattern,
-                  profileCardPatternColor,
-                  profileCardPatternOpacity
-                )}
+                className="absolute inset-0 pointer-events-none rounded-[24px] -z-10"
+                style={getProfileCardPatternStyle(profileCardPattern, profileCardPatternColor, profileCardPatternOpacity)}
               />
             )}
-            <div className="relative z-10">
-              <div className="flex flex-col gap-6 md:flex-row md:items-center">
+            <div className="flex flex-col gap-6 md:flex-row md:items-center">
               <div className="relative">
                 {profile.avatar_url ? (
                   <img
@@ -2871,9 +2934,6 @@ export default function ProfilePage() {
               </div>
 
               <div className="min-w-0 flex-1">
-                <div className="mb-3 inline-flex rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.24em] text-zinc-400">
-                  SoundBored Profile
-                </div>
                 {isEditingDisplayName ? (
                   <div className="flex items-center gap-2">
                     <input
@@ -2929,27 +2989,113 @@ export default function ProfilePage() {
                 )}
                 <p className="mt-1 text-zinc-400">@{profile.username}</p>
 
-                <div className="mt-4 flex flex-wrap gap-3 text-sm text-zinc-300">
-                  <span className="rounded-full border border-white/10 bg-white/5 px-3 py-2">
-                    <span className="font-semibold text-white">
+                <div className="mt-4 flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={() => {
+                      setShowFollowers(!showFollowers);
+                      setShowFollowing(false);
+                    }}
+                    className="cursor-pointer rounded-full border border-white/10 bg-zinc-800 px-3 py-2 transition hover:bg-zinc-700"
+                  >
+                    <span className="text-2xl font-bold text-white">
                       {followerCount}
                     </span>{" "}
-                    followers
-                  </span>
-                  <span className="rounded-full border border-white/10 bg-white/5 px-3 py-2">
-                    <span className="font-semibold text-white">
+                    <span className="text-lg font-bold text-zinc-300">Followers</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowFollowing(!showFollowing);
+                      setShowFollowers(false);
+                    }}
+                    className="cursor-pointer rounded-full border border-white/10 bg-zinc-800 px-3 py-2 transition hover:bg-zinc-700"
+                  >
+                    <span className="text-2xl font-bold text-white">
                       {followingCount}
                     </span>{" "}
-                    following
-                  </span>
+                    <span className="text-lg font-bold text-zinc-300">Following</span>
+                  </button>
+                  {!isOwnProfile && currentUserId && (
+                    <button
+                      onClick={handleToggleFollow}
+                      disabled={followBusy}
+                      className={`ml-auto rounded-lg px-4 py-2 font-semibold transition ${
+                        isFollowing
+                          ? "border border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+                          : "bg-green-500 text-black hover:bg-green-600"
+                      } disabled:opacity-60`}
+                    >
+                      {followBusy ? "Working..." : isFollowing ? "Following" : "Follow"}
+                    </button>
+                  )}
                 </div>
+
+                {showFollowers && followers.length > 0 && (
+                  <div className="mt-4 space-y-2 rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+                    <h3 className="text-sm font-semibold text-white mb-3">Followers</h3>
+                    {followers.map((follower) => (
+                      <Link
+                        key={follower.id}
+                        href={`/profile/${follower.username}`}
+                        className="flex items-center gap-3 rounded-lg bg-zinc-800 px-3 py-2 transition hover:bg-zinc-700"
+                      >
+                        {follower.avatar_url ? (
+                          <img
+                            src={follower.avatar_url}
+                            alt={follower.username}
+                            className="h-8 w-8 rounded-full object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-700 text-xs font-bold text-green-400">
+                            {follower.display_name?.[0]?.toUpperCase() || follower.username?.[0]?.toUpperCase() || "U"}
+                          </div>
+                        )}
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-white">
+                            {follower.display_name || follower.username}
+                          </p>
+                          <p className="truncate text-xs text-zinc-400">@{follower.username}</p>
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
+                )}
+
+                {showFollowing && followingUsers.length > 0 && (
+                  <div className="mt-4 space-y-2 rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+                    <h3 className="text-sm font-semibold text-white mb-3">Following</h3>
+                    {followingUsers.map((user) => (
+                      <Link
+                        key={user.id}
+                        href={`/profile/${user.username}`}
+                        className="flex items-center gap-3 rounded-lg bg-zinc-800 px-3 py-2 transition hover:bg-zinc-700"
+                      >
+                        {user.avatar_url ? (
+                          <img
+                            src={user.avatar_url}
+                            alt={user.username}
+                            className="h-8 w-8 rounded-full object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-700 text-xs font-bold text-green-400">
+                            {user.display_name?.[0]?.toUpperCase() || user.username?.[0]?.toUpperCase() || "U"}
+                          </div>
+                        )}
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-white">
+                            {user.display_name || user.username}
+                          </p>
+                          <p className="truncate text-xs text-zinc-400">@{user.username}</p>
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
-
             </div>
-          </div>
 
-          <div className="relative z-10 mt-6 border-t pt-6" style={{ borderTopColor: profileCardPatternColor }}>
+          {(isOwnProfile || profile.bio?.trim()) && (
+            <div className="relative z-10 mt-6 border-t pt-6" style={{ borderTopColor: profileCardPatternColor }}>
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-lg font-semibold text-white">Bio</h2>
 
@@ -3008,20 +3154,8 @@ export default function ProfilePage() {
                 </div>
               </form>
             )}
-          </div>
-
-          <div className="mt-6 grid gap-4 border-t pt-6 md:grid-cols-2" style={{ borderTopColor: profileCardPatternColor }}>
-            {renderFollowList(
-              "Followers",
-              followers,
-              "No followers yet."
-            )}
-            {renderFollowList(
-              "Following",
-              followingUsers,
-              "Not following anyone yet."
-            )}
-          </div>
+            </div>
+          )}
         </div>
 
         {showAddSection && (
@@ -3071,7 +3205,7 @@ export default function ProfilePage() {
           onLayoutChange={(rglLayout) => handleLayoutChange(rglLayout)}
         >
           {layout.map((section) => (
-            <div key={section.id} className="relative flex h-full flex-col overflow-hidden rounded-xl bg-zinc-900">
+            <div key={section.id} className="relative flex flex-col rounded-xl bg-zinc-900">
               {isEditMode && (
                 <div className="flex items-center gap-1 bg-zinc-800/80 px-2 py-1">
                   <button
@@ -3091,7 +3225,7 @@ export default function ProfilePage() {
                   </div>
                 </div>
               )}
-              <div className="min-h-0 flex-1 overflow-auto p-3">
+              <div className="p-3">
                 {renderSectionContent(section)}
               </div>
             </div>
