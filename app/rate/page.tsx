@@ -22,6 +22,7 @@ import { supabase } from "../../utils/supabase/supabaseClient";
 import { getCurrentUserSafe } from "../../utils/supabase/auth";
 import TopNav from "../../components/TopNav";
 import NoteRating from "../components/NoteRating";
+import MusicReviewCard from "../components/MusicReviewCard";
 
 type SpotifyTrackResult = {
   spotify_track_id: string;
@@ -311,6 +312,14 @@ export default function RateSongPage() {
               </p>
               <p className="mt-1 text-sm text-zinc-400">{Number(rating)} / 5</p>
             </div>
+
+            {(selectedTrack || review.trim()) && (
+              <MusicReviewCard
+                rating={Number(rating)}
+                review={review}
+                accentColor="#4ade80"
+              />
+            )}
 
             <div>
               <label className="mb-2 block text-sm font-medium text-zinc-300">

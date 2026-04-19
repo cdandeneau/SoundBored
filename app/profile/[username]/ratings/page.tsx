@@ -26,6 +26,7 @@ import { getCurrentUserSafe } from "../../../../utils/supabase/auth";
 import TopNav from "../../../../components/TopNav";
 import MusicNotesLoader from "../../../components/MusicNotesLoader";
 import NoteRating from "../../../components/NoteRating";
+import MusicReviewCard from "../../../components/MusicReviewCard";
 
 const DEFAULT_ACCENT_TEXT_COLOR = "#22c55e";
 
@@ -386,6 +387,14 @@ export default function ProfileRatingsPage() {
                             </p>
                           </div>
                         )}
+
+                        <div className="max-w-4xl">
+                          <MusicReviewCard
+                            rating={rating.rating}
+                            review={rating.review}
+                            accentColor={accentTextColor}
+                          />
+                        </div>
 
                         {isOwnProfile && editingRatingId === rating.id ? (
                           <div className="mt-4 space-y-3 rounded-xl border border-zinc-800 bg-zinc-950/50 p-4">

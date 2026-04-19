@@ -47,6 +47,7 @@ import TextSection from "../../components/profile/TextSection";
 import CustomPlaylistSection from "../../components/profile/CustomPlaylistSection";
 import ConcertTicketStubSection from "../../components/profile/ConcertTicketStubSection";
 import AddSectionModal from "../../components/profile/AddSectionModal";
+import MusicReviewCard from "../../components/MusicReviewCard";
 import StickerLayer, {
   type PlacedSticker,
   type UserCustomSticker,
@@ -2176,6 +2177,12 @@ export default function ProfilePage() {
                       </div>
                     </div>
                     {rating.review && (<p className="mt-1.5 truncate text-xs italic" style={{ color: theme.accentTextColor }}>&ldquo;{rating.review}&rdquo;</p>)}
+                    <MusicReviewCard
+                      rating={rating.rating}
+                      review={rating.review}
+                      accentColor={theme.accentTextColor}
+                      compact
+                    />
                     {canCustomizeSections && (
                       <div className="mt-2 flex flex-wrap items-center gap-1">
                         <button onClick={() => startEditRating(rating)} disabled={ratingBusy !== ""} className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50">✎</button>
