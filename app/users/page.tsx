@@ -20,7 +20,6 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../utils/supabase/supabaseClient";
 import { getCurrentUserSafe } from "../../utils/supabase/auth";
-import TopNav from "../../components/TopNav";
 import MusicNotesLoader from "../components/MusicNotesLoader";
 
 type Profile = {
@@ -252,21 +251,11 @@ export default function UsersPage() {
     <main className="min-h-screen px-6 py-12 text-white">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-8">
         <div className="rounded-2xl bg-zinc-900 p-8 shadow-lg">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h1 className="text-4xl font-bold">Discover Users</h1>
-              <p className="mt-2 text-zinc-400">
-                Search SoundBored users and follow their music activity.
-              </p>
-            </div>
-
-            <TopNav
-              showMyProfile
-              myProfileUsername={myUsername}
-              showFeed
-              showUsers={false}
-              showRate
-            />
+          <div>
+            <h1 className="text-4xl font-bold">Discover Users</h1>
+            <p className="mt-2 text-zinc-400">
+              Search SoundBored users and follow their music activity.
+            </p>
           </div>
 
           <form onSubmit={handleSearchSubmit} className="mt-6 flex gap-3">

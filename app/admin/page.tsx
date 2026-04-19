@@ -19,7 +19,6 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "../../utils/supabase/supabaseClient";
 import { getCurrentUserSafe } from "../../utils/supabase/auth";
-import TopNav from "../../components/TopNav";
 import MusicNotesLoader from "../components/MusicNotesLoader";
 
 // Shape of a user row as returned from the profiles table
@@ -239,17 +238,6 @@ export default function AdminPage() {
                 Manage users — ban, unban, or permanently delete accounts.
               </p>
             </div>
-
-            {/* Nav links back to the rest of the app */}
-            <TopNav
-              showMyProfile
-              myProfileUsername={myUsername}
-              showFeed
-              showUsers
-              showRate
-              showAdmin
-              isAdmin
-            />
           </div>
 
           {/* Search box to filter users client-side */}

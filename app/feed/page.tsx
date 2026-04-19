@@ -17,7 +17,6 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "../../utils/supabase/supabaseClient";
 import { getCurrentUserSafe } from "../../utils/supabase/auth";
-import TopNav from "../../components/TopNav";
 import NoteRating from "../components/NoteRating";
 import MusicNotesLoader from "../components/MusicNotesLoader";
 
@@ -433,8 +432,8 @@ export default function FeedPage() {
   }
 
   return (
-    <main className="min-h-screen px-6 py-12 text-white">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-8">
+    <main className="min-h-screen text-white px-6">
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 py-12">
         <div className="rounded-2xl bg-zinc-900 p-8 shadow-lg">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
@@ -447,14 +446,6 @@ export default function FeedPage() {
                 {followingCount === 1 ? "person" : "people"}
               </p>
             </div>
-
-            <TopNav
-              showMyProfile
-              myProfileUsername={myUsername}
-              showFeed={false}
-              showUsers={false}
-              showRate
-            />
           </div>
 
           <form onSubmit={handleSearchSubmit} className="mt-6 space-y-3">
