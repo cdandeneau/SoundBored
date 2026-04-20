@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(grep -n \"profileBoxBg\\\\|profile_box\\\\|hexToRgba.*profileBox\\\\|outerBackground.*profile\\\\|profile.*card.*bg\" app/profile/[username]/page.tsx)"
-    ]
-  }
-}
