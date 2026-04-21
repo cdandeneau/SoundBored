@@ -42,9 +42,9 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} antialiased`}
     >
-      <body className="min-h-full flex flex-col bg-black">
+      <body className="min-h-screen flex flex-col bg-black">
         <AuthProvider>
           {/* Animated floating music notes rendered on a fixed canvas (z-index 1) */}
           <MusicNotes />

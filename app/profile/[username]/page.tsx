@@ -202,12 +202,12 @@ function getProfileCardPatternStyle(
  * The calculation converts pixel heights to grid row units using the formula:
  *   rows = ceil(totalPx / (GRID_ROW_HEIGHT + GRID_MARGIN_Y)) + 1 safety row
  */
-function estimateSnugRows(itemCount: number, extraPx = 0): number {
+function estimateSnugRows(itemCount: number, extraPx = 0, itemPxOverride?: number): number {
   const safeCount = Math.max(0, itemCount);
   const panelPaddingPx = 40; // p-5 top+bottom
   const headerPx = 42;
   const gapPx = 8;
-  const itemPx = 128; // slightly generous to avoid clipping from dynamic content
+  const itemPx = itemPxOverride ?? 128; // slightly generous to avoid clipping from dynamic content
   const emptyPx = 92;
 
   const listPx =
@@ -286,7 +286,7 @@ function getDefaultSectionSize(type: string): { w: number; h: number } {
     case "strollman":
       return { w: 4, h: 32 };
     case "custom-playlist":
-      return { w: 4, h: 16 };
+      return { w: 4, h: 10 };
     case "concert-ticket":
       return { w: 4, h: 20 };
     case "favorite-albums":
@@ -608,56 +608,38 @@ export default function ProfilePage() {
     setBoxReviewCardBgOpacityDraft(theme.reviewCardBgOpacity);
   }, [styleTargetSectionId, layout, accentTextColor]);
 
+  // ResizeObserver: measures each section's actual rendered height and keeps h in sync.
+  // Replaces the old estimateSnugRows-based auto-size effect.
+  const sectionContentRefs = useRef<Map<string, HTMLElement>>(new Map());
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
+
   useEffect(() => {
-    if (isEditModeRef.current) return;
-
-    let heightsChanged = false;
-
-    const withNewHeights = layout.map((section) => {
-      let targetH = section.h;
-
-      if (section.type === "favorite-tracks") {
-        targetH = estimateSnugRows(favoriteTracks.length, showTrackForm ? 320 : 0);
-      } else if (section.type === "favorite-albums") {
-        targetH = estimateSnugRows(favoriteAlbums.length, showAlbumForm ? 320 : 0);
-      } else if (section.type === "recent-ratings") {
-        const reviewCardExtra = recentRatings.length * 80;
-        targetH = estimateSnugRows(recentRatings.length, (editingRatingId ? 120 : 0) + 24 + reviewCardExtra);
-      } else if (section.type === "custom-playlist") {
-        const tracks = (section.data?.tracks as unknown[] | undefined) || [];
-        targetH = estimateSnugRows(tracks.length, 0);
-      }
-
-      if (targetH !== section.h) {
-        heightsChanged = true;
-        return { ...section, h: targetH };
-      }
-
-      return section;
+    resizeObserverRef.current = new ResizeObserver(() => {
+      setLayout((prev) => {
+        let changed = false;
+        const next = prev.map((section) => {
+          const el = sectionContentRefs.current.get(section.id);
+          if (!el) return section;
+          const newH = Math.ceil((el.offsetHeight + GRID_MARGIN_Y) / (GRID_ROW_HEIGHT + GRID_MARGIN_Y));
+          if (newH === section.h) return section;
+          changed = true;
+          return { ...section, h: newH };
+        });
+        if (!changed) return prev;
+        // In edit mode let RGL's compactor resolve positions via onLayoutChange.
+        // In view mode call pushDownOverlaps directly since handleLayoutChange is blocked.
+        return isEditModeRef.current ? next : pushDownOverlaps(next);
+      });
     });
+    return () => resizeObserverRef.current?.disconnect();
+  }, []);
 
-    if (!heightsChanged) return;
-
-    const nextLayout = pushDownOverlaps(withNewHeights);
-
-    setLayout(nextLayout);
-
-    if (currentUserId) {
-      supabase
-        .from("profiles")
-        .update({ profile_layout: nextLayout })
-        .eq("id", currentUserId);
-    }
-  }, [
-    layout,
-    currentUserId,
-    favoriteTracks.length,
-    favoriteAlbums.length,
-    recentRatings.length,
-    showTrackForm,
-    showAlbumForm,
-    editingRatingId,
-  ]);
+  useEffect(() => {
+    const observer = resizeObserverRef.current;
+    if (!observer) return;
+    observer.disconnect();
+    sectionContentRefs.current.forEach((el) => observer.observe(el));
+  }, [layout.length]);
 
   function reorderAlbumsLocal(albumAId: string, albumBId: string) {
     setFavoriteAlbums((prev) => {
@@ -1867,8 +1849,6 @@ export default function ProfilePage() {
   /** Called by react-grid-layout when items are moved or resized */
   const handleLayoutChange = useCallback(
     (rglLayout: Layout) => {
-      // Only persist when the user is actively editing
-      if (!isEditMode) return;
       const updated = layout.map((section) => {
         const item = rglLayout.find((l: LayoutItem) => l.i === section.id);
         if (!item) return section;
@@ -1881,8 +1861,18 @@ export default function ProfilePage() {
         return item.x !== section.x || item.y !== section.y || item.w !== section.w || item.h !== section.h;
       });
       if (!hasPositionChange) return;
+      // In view mode, only apply RGL's resolved positions when the current layout
+      // actually has overlapping sections. This prevents the compactor from
+      // shifting boxes on initial load when there are no overlaps to resolve.
+      if (!isEditMode) {
+        const layoutHasOverlaps = layout.some((a, i) =>
+          layout.slice(i + 1).some((b) => sectionsCollide(a, b))
+        );
+        if (!layoutHasOverlaps) return;
+      }
       setLayout(updated);
-      // Debounce save to Supabase
+      // Only persist to Supabase when the user is actively editing.
+      if (!isEditMode) return;
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
       saveTimeoutRef.current = setTimeout(() => {
         if (!currentUserId) return;
@@ -1946,6 +1936,12 @@ export default function ProfilePage() {
         return { ...section, w: size.w, h: size.h };
       }
 
+      // Custom playlists: size to actual track count.
+      if (section.type === "custom-playlist") {
+        const tracks = (section.data?.tracks as unknown[] | undefined) || [];
+        return { ...section, h: estimateSnugRows(tracks.length, 24, 72) };
+      }
+
       // Other sections: snap to tuned defaults so auto-fit has visible effect.
       const size = getDefaultSectionSize(section.type);
       return { ...section, h: size.h };
@@ -1955,11 +1951,11 @@ export default function ProfilePage() {
     setIsAutoFitting(false);
   }
 
-  function updateSectionData(sectionId: string, data: Record<string, unknown>, newTitle?: string) {
+  function updateSectionData(sectionId: string, data: Record<string, unknown>, newTitle?: string, newH?: number) {
     saveLayout(
       layout.map((s) =>
         s.id === sectionId
-          ? { ...s, data, ...(newTitle !== undefined ? { title: newTitle } : {}) }
+          ? { ...s, data, ...(newTitle !== undefined ? { title: newTitle } : {}), ...(newH !== undefined ? { h: newH } : {}) }
           : s
       )
     );
@@ -2059,13 +2055,13 @@ export default function ProfilePage() {
             onUpdateTitle={(title) => updateSectionTitle(section.id, title)}
             onAddTrack={(track) => {
               const tracks = [...((section.data?.tracks as unknown[]) || []), track];
-              updateSectionData(section.id, { ...section.data, tracks });
+              updateSectionData(section.id, { ...section.data, tracks }, undefined, estimateSnugRows(tracks.length, 24, 72));
             }}
             onRemoveTrack={(spotifyTrackId) => {
               const tracks = ((section.data?.tracks as { spotify_track_id: string }[]) || []).filter(
                 (t) => t.spotify_track_id !== spotifyTrackId
               );
-              updateSectionData(section.id, { ...section.data, tracks });
+              updateSectionData(section.id, { ...section.data, tracks }, undefined, estimateSnugRows(tracks.length, 24, 72));
             }}
           />
         );
@@ -2154,9 +2150,17 @@ export default function ProfilePage() {
                         <p className="truncate text-xs" style={{ color: theme.accentTextColor }}>{rating.artist_name}</p>
                         <p className="text-[10px]" style={{ color: theme.accentTextColor }}>Reviewed {formatDate(rating.updated_at)}</p>
                       </div>
-                      {rating.spotify_track_id && (
-                        <a href={`https://open.spotify.com/track/${rating.spotify_track_id}`} target="_blank" rel="noopener noreferrer" className="shrink-0 text-xs hover:underline" style={{ color: theme.accentTextColor }}>Listen on Spotify</a>
-                      )}
+                      <div className="flex shrink-0 items-center gap-1">
+                        {canCustomizeSections && (
+                          <>
+                            <button onClick={() => startEditRating(rating)} disabled={ratingBusy !== ""} className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50">✎</button>
+                            <button onClick={() => handleDeleteRating(rating.id)} disabled={ratingBusy !== ""} className="rounded border border-red-700 px-2 py-1 text-xs text-red-300 hover:bg-red-950/40 disabled:opacity-50">✕</button>
+                          </>
+                        )}
+                        {rating.spotify_track_id && (
+                          <a href={`https://open.spotify.com/track/${rating.spotify_track_id}`} target="_blank" rel="noopener noreferrer" className="text-xs hover:underline" style={{ color: theme.accentTextColor }}>Listen on Spotify</a>
+                        )}
+                      </div>
                     </div>
                     <MusicReviewCard
                       rating={rating.rating}
@@ -2165,12 +2169,6 @@ export default function ProfilePage() {
                       outerBg={hexToRgba(theme.reviewCardBgColor, theme.reviewCardBgOpacity)}
                       compact
                     />
-                    {canCustomizeSections && (
-                      <div className="mt-2 flex flex-wrap items-center gap-1">
-                        <button onClick={() => startEditRating(rating)} disabled={ratingBusy !== ""} className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50">✎</button>
-                        <button onClick={() => handleDeleteRating(rating.id)} disabled={ratingBusy !== ""} className="rounded border border-red-700 px-2 py-1 text-xs text-red-300 hover:bg-red-950/40 disabled:opacity-50">✕</button>
-                      </div>
-                    )}
                   </>
                 )}
               </div>
@@ -2236,29 +2234,25 @@ export default function ProfilePage() {
             <div className="rounded-xl border border-dashed border-zinc-700 p-4 text-center text-sm text-zinc-400">No favorite tracks yet.</div>
           ) : (
             favoriteTracks.map((track) => (
-              <div key={track.id} className="rounded-lg p-3 min-h-[7rem]" style={{ backgroundColor: hexToRgba(theme.innerBgColor, theme.innerBgOpacity) }}>
+              <div key={track.id} className="rounded-lg p-3" style={{ backgroundColor: hexToRgba(theme.innerBgColor, theme.innerBgOpacity) }}>
                 <div className="flex items-center gap-3">
                   {track.image_url ? (<Image src={track.image_url} alt={track.track_name} width={48} height={48} className="h-12 w-12 rounded object-cover" />) : (<div className="h-12 w-12 rounded bg-zinc-700" />)}
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold text-white">{track.track_name}</p>
                     <p className="truncate text-xs" style={{ color: theme.accentTextColor }}>{track.artist_name}</p>
                   </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    {canCustomizeSections && (
+                      <>
+                        <button onClick={() => moveTrackUp(track)} disabled={track.position === 1 || busyAction !== ""} className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50">↑</button>
+                        <button onClick={() => moveTrackDown(track)} disabled={track.position === 5 || busyAction !== ""} className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50">↓</button>
+                        <button onClick={() => handleDeleteFavoriteTrack(track.id)} disabled={busyAction !== ""} className="rounded border border-red-700 px-2 py-1 text-xs text-red-300 hover:bg-red-950/40 disabled:opacity-50">✕</button>
+                      </>
+                    )}
+                    {track.spotify_track_id && (<a href={`https://open.spotify.com/track/${track.spotify_track_id}`} target="_blank" rel="noopener noreferrer" className="text-xs hover:underline" style={{ color: theme.accentTextColor }}>Listen on Spotify</a>)}
+                  </div>
                   <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold text-black" style={{ backgroundColor: theme.accentTextColor }}>{track.position}</div>
                 </div>
-                <p className="mt-1.5 text-xs text-transparent">&nbsp;</p>
-                {canCustomizeSections && (
-                  <div className="mt-2 flex flex-wrap items-center gap-1">
-                    <button onClick={() => moveTrackUp(track)} disabled={track.position === 1 || busyAction !== ""} className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50">↑</button>
-                    <button onClick={() => moveTrackDown(track)} disabled={track.position === 5 || busyAction !== ""} className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50">↓</button>
-                    <button onClick={() => handleDeleteFavoriteTrack(track.id)} disabled={busyAction !== ""} className="rounded border border-red-700 px-2 py-1 text-xs text-red-300 hover:bg-red-950/40 disabled:opacity-50">✕</button>
-                    {track.spotify_track_id && (<a href={`https://open.spotify.com/track/${track.spotify_track_id}`} target="_blank" rel="noopener noreferrer" className="ml-auto text-xs hover:underline" style={{ color: theme.accentTextColor }}>Listen on Spotify</a>)}
-                  </div>
-                )}
-                {!canCustomizeSections && track.spotify_track_id && (
-                  <div className="mt-2 flex justify-end">
-                    <a href={`https://open.spotify.com/track/${track.spotify_track_id}`} target="_blank" rel="noopener noreferrer" className="text-xs hover:underline" style={{ color: theme.accentTextColor }}>Listen on Spotify</a>
-                  </div>
-                )}
               </div>
             ))
           )}
@@ -2320,29 +2314,25 @@ export default function ProfilePage() {
             <div className="rounded-xl border border-dashed border-zinc-700 p-4 text-center text-sm text-zinc-400">No favorite albums yet.</div>
           ) : (
             favoriteAlbums.map((album) => (
-              <div key={album.id} className="rounded-lg p-3 min-h-[7rem]" style={{ backgroundColor: hexToRgba(theme.innerBgColor, theme.innerBgOpacity) }}>
+              <div key={album.id} className="rounded-lg p-3" style={{ backgroundColor: hexToRgba(theme.innerBgColor, theme.innerBgOpacity) }}>
                 <div className="flex items-center gap-3">
                   {album.image_url ? (<Image src={album.image_url} alt={album.album_name} width={48} height={48} className="h-12 w-12 rounded object-cover" />) : (<div className="h-12 w-12 rounded bg-zinc-700" />)}
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold text-white">{album.album_name}</p>
                     <p className="truncate text-xs" style={{ color: theme.accentTextColor }}>{album.artist_name}</p>
                   </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    {canCustomizeSections && (
+                      <>
+                        <button onClick={() => moveAlbumUp(album)} disabled={album.position === 1 || busyAction !== ""} className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50">↑</button>
+                        <button onClick={() => moveAlbumDown(album)} disabled={album.position === 5 || busyAction !== ""} className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50">↓</button>
+                        <button onClick={() => handleDeleteFavoriteAlbum(album.id)} disabled={busyAction !== ""} className="rounded border border-red-700 px-2 py-1 text-xs text-red-300 hover:bg-red-950/40 disabled:opacity-50">✕</button>
+                      </>
+                    )}
+                    {album.spotify_album_id && (<a href={`https://open.spotify.com/album/${album.spotify_album_id}`} target="_blank" rel="noopener noreferrer" className="text-xs hover:underline" style={{ color: theme.accentTextColor }}>Listen on Spotify</a>)}
+                  </div>
                   <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold text-black" style={{ backgroundColor: theme.accentTextColor }}>{album.position}</div>
                 </div>
-                <p className="mt-1.5 text-xs text-transparent">&nbsp;</p>
-                {canCustomizeSections && (
-                  <div className="mt-2 flex flex-wrap items-center gap-1">
-                    <button onClick={() => moveAlbumUp(album)} disabled={album.position === 1 || busyAction !== ""} className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50">↑</button>
-                    <button onClick={() => moveAlbumDown(album)} disabled={album.position === 5 || busyAction !== ""} className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50">↓</button>
-                    <button onClick={() => handleDeleteFavoriteAlbum(album.id)} disabled={busyAction !== ""} className="rounded border border-red-700 px-2 py-1 text-xs text-red-300 hover:bg-red-950/40 disabled:opacity-50">✕</button>
-                    {album.spotify_album_id && (<a href={`https://open.spotify.com/album/${album.spotify_album_id}`} target="_blank" rel="noopener noreferrer" className="ml-auto text-xs hover:underline" style={{ color: theme.accentTextColor }}>Listen on Spotify</a>)}
-                  </div>
-                )}
-                {!canCustomizeSections && album.spotify_album_id && (
-                  <div className="mt-2 flex justify-end">
-                    <a href={`https://open.spotify.com/album/${album.spotify_album_id}`} target="_blank" rel="noopener noreferrer" className="text-xs hover:underline" style={{ color: theme.accentTextColor }}>Listen on Spotify</a>
-                  </div>
-                )}
               </div>
             ))
           )}
@@ -2353,7 +2343,7 @@ export default function ProfilePage() {
 
   if (loading) {
     return (
-      <main className="min-h-screen overflow-x-hidden px-6 py-8 text-white">
+      <main className="min-h-screen overflow-x-clip px-6 py-8 text-white">
         <div className="mx-auto max-w-7xl animate-pulse">
           {/* Profile card skeleton */}
           <div className="rounded-[28px] bg-zinc-900 p-8 shadow-lg">
@@ -2435,7 +2425,7 @@ export default function ProfilePage() {
   }
 
   return (
-    <main className="min-h-screen overflow-x-hidden px-6 py-8 text-white">
+    <main className="min-h-screen overflow-x-clip px-6 py-8 text-white">
       <div className="flex w-full flex-col gap-6">
 
         {/* Admin action strip — only shown to admins viewing someone else's profile */}
@@ -3189,7 +3179,10 @@ export default function ProfilePage() {
                   />
                 </>
               )}
-              <div className="p-3">
+              <div className="p-3" ref={(el) => {
+                if (el) sectionContentRefs.current.set(section.id, el);
+                else sectionContentRefs.current.delete(section.id);
+              }}>
                 {renderSectionContent(section)}
               </div>
             </div>

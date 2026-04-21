@@ -1,13 +1,4 @@
-/**
- * lib/spotify.ts — Spotify API authentication
- *
- * Uses the Client Credentials OAuth flow to get a short-lived access token.
- * This flow is server-to-server only — it doesn't require a user to log in
- * and is suitable for reading public Spotify data (search, track info, etc.).
- *
- * The token is fetched fresh on every call (no caching). Tokens expire in 3600s.
- * If we need to reduce Spotify API calls we could cache this in memory or Redis.
- */
+let cachedToken: { access_token: string; expires_at: number } | null = null;
 
 export async function getSpotifyAccessToken() {
   const clientId = process.env.SPOTIFY_CLIENT_ID;
@@ -15,6 +6,10 @@ export async function getSpotifyAccessToken() {
 
   if (!clientId || !clientSecret) {
     throw new Error("Missing Spotify credentials");
+  }
+
+  if (cachedToken && Date.now() < cachedToken.expires_at) {
+    return { access_token: cachedToken.access_token, token_type: "Bearer", expires_in: 3600 };
   }
 
   const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
@@ -36,9 +31,7 @@ export async function getSpotifyAccessToken() {
     throw new Error(`Spotify token error: ${response.status} ${text}`);
   }
 
-  return response.json() as Promise<{
-    access_token: string;
-    token_type: string;
-    expires_in: number;
-  }>;
+  const data = await response.json() as { access_token: string; token_type: string; expires_in: number };
+  cachedToken = { access_token: data.access_token, expires_at: Date.now() + (data.expires_in - 60) * 1000 };
+  return data;
 }
