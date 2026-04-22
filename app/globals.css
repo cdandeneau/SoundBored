@@ -17,6 +17,7 @@ html {
 body {
   background: transparent;
   color: #f4f4f5;
+  min-width: 1440px;
 }
 
 .app-shell {

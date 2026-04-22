@@ -86,6 +86,7 @@ type LayoutSection = {
 const GRID_COLS = 12;
 const GRID_ROW_HEIGHT = 15;
 const GRID_MARGIN_Y = 8;
+const FIXED_GRID_WIDTH = 1392;
 const DEFAULT_NOTE_COLOR = "#22c55e";
 const DEFAULT_ACCENT_TEXT_COLOR = "#22c55e";
 const DEFAULT_CARD_BG_COLOR = "#27272a";
@@ -539,25 +540,12 @@ export default function ProfilePage() {
   const isEditModeRef = useRef(false);
   const [showAddSection, setShowAddSection] = useState(false);
   const [isAutoFitting, setIsAutoFitting] = useState(false);
-  const [viewportWidth, setViewportWidth] = useState(1200);
   const [panelX, setPanelX] = useState(20);
   const [panelY, setPanelY] = useState(100);
   const [isDraggingPanel, setIsDraggingPanel] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const canCustomizeSections = isOwnProfile && isEditMode;
 
-  useEffect(() => {
-    const updateWidth = () => {
-      setViewportWidth(window.innerWidth || 1200);
-    };
-
-    updateWidth();
-    window.addEventListener("resize", updateWidth);
-
-    return () => {
-      window.removeEventListener("resize", updateWidth);
-    };
-  }, []);
 
   useEffect(() => {
     if (!isEditMode) {
@@ -615,6 +603,7 @@ export default function ProfilePage() {
 
   useEffect(() => {
     resizeObserverRef.current = new ResizeObserver(() => {
+      if (isEditModeRef.current) return;
       setLayout((prev) => {
         let changed = false;
         const next = prev.map((section) => {
@@ -2343,7 +2332,7 @@ export default function ProfilePage() {
 
   if (loading) {
     return (
-      <main className="min-h-screen overflow-x-clip px-6 py-8 text-white">
+      <main className="mx-auto min-h-screen overflow-x-auto px-6 py-8 text-white" style={{ width: 1440, minWidth: 1440 }}>
         <div className="mx-auto max-w-7xl animate-pulse">
           {/* Profile card skeleton */}
           <div className="rounded-[28px] bg-zinc-900 p-8 shadow-lg">
@@ -2425,7 +2414,7 @@ export default function ProfilePage() {
   }
 
   return (
-    <main className="min-h-screen overflow-x-clip px-6 py-8 text-white">
+    <main className="mx-auto min-h-screen overflow-x-auto px-6 py-8 text-white" style={{ width: 1440, minWidth: 1440 }}>
       <div className="flex w-full flex-col gap-6">
 
         {/* Admin action strip — only shown to admins viewing someone else's profile */}
@@ -3111,9 +3100,10 @@ export default function ProfilePage() {
         )}
       </div>
 
-      {/* Grid layout — full-width, outside the constrained container */}
+      {/* Grid layout — fixed width, does not reflow with viewport changes */}
       <div
-        className={`relative left-1/2 w-screen -translate-x-1/2 ${isEditMode ? "profile-grid-overlay" : ""}`}
+        className={`relative ${isEditMode ? "profile-grid-overlay" : ""}`}
+        style={{ width: FIXED_GRID_WIDTH }}
       >
         {/* Sticker layer sits absolutely over the grid; pointer-events:none in view mode */}
         <StickerLayer
@@ -3127,7 +3117,7 @@ export default function ProfilePage() {
         />
         <ResponsiveGridLayout
           className="layout"
-          width={viewportWidth}
+          width={FIXED_GRID_WIDTH}
           layouts={{
             lg: layout.map((s) => ({
               i: s.id,
